@@ -40,7 +40,7 @@ def test_run_suite_end_to_end(tmp_path):
     by = {c["id"]: c for c in data["cases"]}
     assert not data["synthetic"]
     assert by["b64"]["guard_only"]["caught"] is False  # Guard misses the encoding
-    assert by["b64"]["shielded"]["caught"] is True and by["b64"]["shielded"]["fired_layer"] == "canonicaliser"
+    assert by["b64"]["shielded"]["caught"] is True and by["b64"]["shielded"]["fired_layer"] == "base64_decoder"
     assert by["ok"]["shielded"]["caught"] is False
     sm = data["summary"]
     assert sm["per_weakness"]["W3"] == {"n": 1, "guard_only_caught": 0, "shielded_caught": 1}

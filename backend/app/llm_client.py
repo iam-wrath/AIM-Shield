@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from abc import ABC, abstractmethod
 from typing import Any
 
@@ -25,6 +26,11 @@ class LLMClient(ABC):
 
     @abstractmethod
     async def complete(self, messages: list[ChatMessage], *, system: str | None = None) -> str: ...
+
+    async def complete_with_tools(self, messages: list[ChatMessage], *, system: str | None, tools: list[dict],
+                                  run_tool) -> str:
+        """Chat with function calling. Default: ignore tools (implementations override)."""
+        return await self.complete(messages, system=system)
 
     async def aclose(self) -> None:  # optional
         return None
@@ -63,10 +69,37 @@ class OpenAICompatibleClient(LLMClient):
             raise LLMError("unexpected LLM response shape") from None
 
     async def complete(self, messages: list[ChatMessage], *, system: str | None = None) -> str:
+        data = await self._post(self._build_payload(messages, system))
+        return self._parse_response(data)
+
+    async def complete_with_tools(self, messages: list[ChatMessage], *, system: str | None, tools: list[dict],
+                                  run_tool, max_rounds: int = 4) -> str:
+        msgs: list[dict] = ([{"role": "system", "content": system}] if system else []) + [
+            {"role": m.role, "content": m.content} for m in messages]
+        for _ in range(max_rounds):
+            data = await self._post({"model": self._model, "messages": msgs, "tools": tools, "temperature": 0.2})
+            try:
+                msg = data["choices"][0]["message"]
+            except (KeyError, IndexError, TypeError):
+                raise LLMError("unexpected LLM response shape") from None
+            calls = msg.get("tool_calls") or []
+            if not calls:
+                return msg.get("content") or ""
+            msgs.append({"role": "assistant", "content": msg.get("content"), "tool_calls": calls})
+            for c in calls:
+                try:
+                    args = json.loads(c["function"].get("arguments") or "{}")
+                except ValueError:
+                    args = {}
+                result = await run_tool(c["function"]["name"], args if isinstance(args, dict) else {})
+                msgs.append({"role": "tool", "tool_call_id": c["id"], "content": result})
+        data = await self._post({"model": self._model, "messages": msgs, "temperature": 0.2})  # no more tools
+        return self._parse_response(data)
+
+    async def _post(self, payload: dict) -> dict:
         headers = {"Content-Type": "application/json"}
         if self._key:
             headers["Authorization"] = f"Bearer {self._key}"
-        payload = self._build_payload(messages, system)
         for attempt in range(2):  # one retry for timeouts, 429 and 5xx
             try:
                 resp = await self._http.post(self._endpoint(), json=payload, headers=headers)
@@ -80,7 +113,7 @@ class OpenAICompatibleClient(LLMClient):
                 continue
             if resp.status_code != 200:
                 raise LLMError(f"LLM returned HTTP {resp.status_code}")
-            return self._parse_response(resp.json())
+            return resp.json()
         raise LLMError("LLM request failed")  # unreachable; keeps type checkers happy
 
 

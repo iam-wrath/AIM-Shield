@@ -18,16 +18,17 @@ We probed the real Guard with 68 synthetic prompts; every probe with its `reques
 
 | # | Weakness | Aim layer | File |
 | --- | --- | --- | --- |
-| W1 | Local blind spot: Twi/Pidgin, Ghana Card, MoMo + PIN, KNUST IDs, TIN, `sk-`/`ghp_`/`AKIA` keys | Ghana Lens (both sides), Language Bridge | `layers/ghana_lens.py`, `layers/language_bridge.py` |
+| W1 | Ghana data blind spot: Ghana Card, MoMo + PIN, KNUST IDs, TIN, `sk-`/`ghp_`/`AKIA` keys | Ghana Lens (both sides): masks, routes the one-time code | `layers/ghana_lens.py` |
+| (identity) | The Guard sees text, not who is logged in | Identity Binding: trust level and ownership, checks every tool call | `layers/identity_binding.py`, `kwikpay.py` |
 | W2 | Amnesia: payload split across turns | Conversation Memory | `layers/memory.py` |
-| W3 | Disguise: base64, hex, leetspeak, spaced letters, homoglyphs, zero-width, reversed | Canonicaliser | `layers/canonicaliser.py` |
+| W3 | Base64 passes the Guard (leetspeak, spaced letters, homoglyphs, zero-width, reversed text, hex and ROT13 do not) | Base64 decoder: decode, then re-check with the Guard | `layers/canonicaliser.py` |
 | W4 | Fail-open on `partial` / 502 / 429 | Fail-safe Policy (+ SHA-256 result cache in the client) | `layers/failsafe.py`, `policy.py`, `guard_client.py` |
 | W5 | Length: >4,000 chars gives 413 | Chunker (overlapping 3,800-char windows) | `layers/chunker.py`, `policy.py` |
 | W6 | Indirect injection via RAG docs, system-prompt leakage | RAG screen, Output Sentinel | `rag/store.py`, `layers/output_sentinel.py` |
 
 Every decision is one Verdict: ALLOW, WARN, REDACT or BLOCK, with the layer that fired, a plain-language reason, a next step, and a per-layer trace with latency. Local checks run first (no quota); a BLOCK stops the remaining layers to save quota. Guard errors and crashing layers fail closed unless the Fail-safe Policy's local checks find nothing risky.
 
-Stand-in data files (`layers/data/ghana_patterns.json`, `layers/data/twi_pidgin_lexicon.json`, `attacks/starter.json`, `rag_docs/`) are working defaults; extend or replace them without touching code.
+Stand-in data files (`layers/data/ghana_patterns.json`, `attacks/starter.json`, `rag_docs/`) are working defaults; extend or replace them without touching code.
 
 ## Setup
 
@@ -86,12 +87,12 @@ python probes/run_probes.py --dry-run      # fill probes/probes.json first; --li
 python eval/run_suite.py --base http://localhost:8000   # real run, ~7 Guard calls per turn; max twice a day
 ```
 
-`eval/results.json` holds the last **real** run (`"synthetic": false`, 18 attacks, real Guard and `gpt-4o-mini`). The two W4 attacks use the simulated Guard fault, so they cost no quota. A first-pass summary: Guard alone caught 0 of the 12 attacks in W1 to W6 (counting the two simulated W4 cases); Guard + Aim caught all 12; harmless messages wrongly blocked 0 of 3 on both sides; Aim's median added screening time on messages that pass was about 445 ms (p95 about 2.5 s, driven by the Language Bridge translating Twi/Pidgin), excluding the LLM. Christabel: re-run and put your final numbers here.
+`eval/results.json` currently holds a real run of the **previous build** (before KwikPay Assist, Identity Binding and the Fail-safe money pause), so its numbers are out of date. Re-run `eval/run_suite.py` against the final build and put the measured table here (Guard alone vs Guard + Aim per weakness, harmless messages wrongly blocked, added screening time, Guard calls per message).
 
 ## Known limitations
 
-- Detection is heuristic (regexes, a small lexicon); it will miss novel disguises and unusual Twi/Pidgin. Honest misses go in the scoreboard's "Still missed" list.
+- Detection is heuristic (regexes and patterns); it will miss novel formats and phrasings. Honest misses go in the scoreboard's "Still missed" list.
+- We dropped a Twi/Pidgin translation layer: the Guard already catches Twi and Pidgin injections (probes w1-1, w1-2), so it would solve a problem we could not show.
 - RAG retrieval is naive keyword matching over a tiny corpus.
-- The Language Bridge depends on the LLM translating correctly.
 - The evaluation suite is small (18 attacks); the numbers show the demo works, not general effectiveness.
 - No token or real personal data is in this repo.

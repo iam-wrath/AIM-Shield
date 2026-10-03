@@ -26,6 +26,7 @@ from .guard_client import (
     GuardUnavailable,
 )
 from .layers import build_layers
+from .kwikpay import TOOLS, AuthStore, ToolRunner, maybe_send_otp, try_verify
 from .llm_client import ChatMessage, LLMClient, LLMError, build_llm_client
 from .models import ChatRequest, Decision, GuardOnlyResponse, ShieldedResponse
 from .policy import ShieldPipeline
@@ -56,7 +57,8 @@ def create_app(settings: Settings | None = None, llm: LLMClient | None = None,
         app.state.sessions = SessionStore(s.session_history_limit)
         app.state.events = EventLog(s.db_path)
         app.state.rag = RagStore(s.rag_dir)
-        inputs, outputs = build_layers(s)
+        app.state.auth = AuthStore()
+        inputs, outputs = build_layers(s, app.state.auth)
         app.state.pipeline = ShieldPipeline(app.state.guard, app.state.llm,
                                             input_layers=inputs, output_layers=outputs)
         app.state.usage_cache = (0.0, None)
@@ -123,6 +125,7 @@ def create_app(settings: Settings | None = None, llm: LLMClient | None = None,
         st = app.state
         ms = lambda: round((time.perf_counter() - t0) * 1000, 1)  # noqa: E731
 
+        state = st.auth.ensure("guard-only", req.session_id, req.persona)
         naive = FaultGuard(req.simulate) if req.simulate else st.guard_naive
         try:
             gp = await naive.check_prompt(req.message)
@@ -134,15 +137,21 @@ def create_app(settings: Settings | None = None, llm: LLMClient | None = None,
             st.events.record(session_id=req.session_id, mode="guard-only", stage="prompt",
                              decision="BLOCK", fired_layer="guard",
                              guard_request_id=gp.request_id, latency_ms=ms())
-            return GuardOnlyResponse(reply=None, blocked=True, stage="prompt",
-                                     guard_prompt=gp, total_latency_ms=ms())
+            return GuardOnlyResponse(reply=None, blocked=True, stage="prompt", guard_prompt=gp,
+                                     trust_level=state.level, total_latency_ms=ms())
 
         history = st.sessions.history("guard-only", req.session_id)
         history.append(_user(req.message))
         # A naive app puts retrieved text straight into the prompt, unchecked.
         context = [c.text for c in st.rag.retrieve(req.message)]
-        reply = await st.llm.complete(history, system=build_system_prompt(
-            st.settings.canary_token, context))
+        # It also checks the one-time code, but passes the code on to the model unmasked, and its
+        # tools trust whatever number the model passes them.
+        try_verify(state, req.message)
+        runner = ToolRunner(state, enforce=False)
+        await maybe_send_otp(state, runner, req.message)
+        reply = await st.llm.complete_with_tools(
+            history, system=build_system_prompt(st.settings.canary_token, context, state),
+            tools=TOOLS, run_tool=runner.run)
 
         try:
             gr = await naive.check_response(reply) if reply.strip() else None
@@ -154,14 +163,15 @@ def create_app(settings: Settings | None = None, llm: LLMClient | None = None,
             st.events.record(session_id=req.session_id, mode="guard-only", stage="response",
                              decision="BLOCK", fired_layer="guard",
                              guard_request_id=gr.request_id, latency_ms=ms())
-            return GuardOnlyResponse(reply=None, blocked=True, stage="response",
-                                     guard_prompt=gp, guard_response=gr, total_latency_ms=ms())
+            return GuardOnlyResponse(reply=None, blocked=True, stage="response", guard_prompt=gp,
+                                     guard_response=gr, tool_log=runner.events, trust_level=state.level,
+                                     total_latency_ms=ms())
 
         st.sessions.append_turn("guard-only", req.session_id, req.message, reply)
         st.events.record(session_id=req.session_id, mode="guard-only", stage="ok",
                          decision="ALLOW", guard_request_id=gp.request_id, latency_ms=ms())
-        return GuardOnlyResponse(reply=reply, blocked=False, stage="ok", guard_prompt=gp,
-                                 guard_response=gr, total_latency_ms=ms())
+        return GuardOnlyResponse(reply=reply, blocked=False, stage="ok", guard_prompt=gp, guard_response=gr,
+                                 tool_log=runner.events, trust_level=state.level, total_latency_ms=ms())
 
     @app.post("/chat/shielded", response_model=ShieldedResponse)
     async def chat_shielded(req: ChatRequest):
@@ -170,6 +180,7 @@ def create_app(settings: Settings | None = None, llm: LLMClient | None = None,
         st = app.state
         ms = lambda: round((time.perf_counter() - t0) * 1000, 1)  # noqa: E731
 
+        state = st.auth.ensure("shielded", req.session_id, req.persona)
         pipeline = st.pipeline
         if req.simulate:  # same layers, but the Guard fails the way we are demonstrating
             pipeline = ShieldPipeline(FaultGuard(req.simulate), st.llm,
@@ -181,7 +192,7 @@ def create_app(settings: Settings | None = None, llm: LLMClient | None = None,
                          latency_ms=iv.total_latency_ms)
         if iv.decision is Decision.BLOCK:
             return ShieldedResponse(reply=f"{iv.reason} {iv.next_step}".strip(), blocked=True,
-                                    input_verdict=iv, total_latency_ms=ms())
+                                    input_verdict=iv, trust_level=state.level, total_latency_ms=ms())
 
         message = iv.sanitized_text or req.message
         safe_chunks, rag_step = await screen_chunks(pipeline.guard, st.rag.retrieve(message))
@@ -191,8 +202,11 @@ def create_app(settings: Settings | None = None, llm: LLMClient | None = None,
             iv.decision, iv.fired_layer, iv.reason = Decision.WARN, "rag_screen", rag_step.reason
         history = st.sessions.history("shielded", req.session_id)
         history.append(_user(message))
-        reply = await st.llm.complete(history, system=build_system_prompt(
-            st.settings.canary_token, [c.text for c in safe_chunks]))
+        runner = ToolRunner(state, enforce=True, money_paused=iv.degraded)  # every tool call is checked against the logged-in customer
+        await maybe_send_otp(state, runner, message)
+        reply = await st.llm.complete_with_tools(
+            history, system=build_system_prompt(st.settings.canary_token, [c.text for c in safe_chunks], state),
+            tools=TOOLS, run_tool=runner.run)
 
         ov = await pipeline.screen_output(req.session_id, reply) if reply.strip() else None
         if ov is not None:
@@ -202,12 +216,13 @@ def create_app(settings: Settings | None = None, llm: LLMClient | None = None,
                              latency_ms=ov.total_latency_ms)
             if ov.decision is Decision.BLOCK:
                 return ShieldedResponse(reply=f"{ov.reason} {ov.next_step}".strip(), blocked=True,
-                                        input_verdict=iv, output_verdict=ov, total_latency_ms=ms())
+                                        input_verdict=iv, output_verdict=ov, tool_log=runner.events,
+                                        trust_level=state.level, total_latency_ms=ms())
             reply = ov.sanitized_text or reply
 
         st.sessions.append_turn("shielded", req.session_id, message, reply)
-        return ShieldedResponse(reply=reply, blocked=False, input_verdict=iv,
-                                output_verdict=ov, total_latency_ms=ms())
+        return ShieldedResponse(reply=reply, blocked=False, input_verdict=iv, output_verdict=ov,
+                                tool_log=runner.events, trust_level=state.level, total_latency_ms=ms())
 
     return app
 

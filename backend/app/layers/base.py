@@ -36,6 +36,7 @@ class LayerContext:
     guard: GuardClient
     llm: LLMClient | None = None
     guard_result: GuardResult | None = None  # the primary Guard check of this text
+    original_text: str = ""  # the unmodified message/reply, before any layer masked it
 
 
 @dataclass

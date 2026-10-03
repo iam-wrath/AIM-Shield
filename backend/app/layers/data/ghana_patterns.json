@@ -15,7 +15,7 @@
     },
     {
       "name": "momo_pin",
-      "kind": "credential",
+      "kind": "pin",
       "label": "MoMo or account PIN",
       "regex": "(?i)\\b(?:momo\\s+|mobile\\s+money\\s+)?pin\\b[^\\d\\n]{0,15}\\d{4,6}\\b"
     },
@@ -48,6 +48,12 @@
       "kind": "credential",
       "label": "AWS access key (AKIA)",
       "regex": "\\bAKIA[0-9A-Z]{16}\\b"
+    },
+    {
+      "name": "kp_txn",
+      "kind": "id",
+      "label": "KwikPay transaction ID",
+      "regex": "\\bKP\\d{8}\\b"
     }
   ]
 }

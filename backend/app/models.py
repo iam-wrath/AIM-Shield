@@ -58,6 +58,14 @@ class Decision(str, Enum):
 DECISION_RANK = {Decision.ALLOW: 0, Decision.WARN: 1, Decision.REDACT: 2, Decision.BLOCK: 3}
 
 
+class ToolEvent(BaseModel):
+    tool: str
+    args: dict = Field(default_factory=dict)
+    status: str  # "executed" | "denied"
+    detail: str = ""
+    authorised: bool = True  # ground truth from the mock world, recorded on both sides
+
+
 class TraceStep(BaseModel):
     layer: str
     decision: Decision  # ALLOW=green, WARN/REDACT=amber, BLOCK=red in the UI
@@ -76,6 +84,7 @@ class Verdict(BaseModel):
     trace: list[TraceStep] = Field(default_factory=list)
     total_latency_ms: float = 0.0
     guard_calls: int = 0
+    degraded: bool = False  # the Guard gave no full answer (outage, rate limit, partial): local checks decided
 
 
 # ---- API bodies -----------------------------------------------------------------
@@ -84,6 +93,7 @@ class ChatRequest(BaseModel):
     session_id: str = Field(min_length=1, max_length=128)
     message: str = Field(min_length=1)
     simulate: Literal["outage", "partial"] | None = None  # demo: pretend the Guard fails (W4)
+    persona: Literal["anonymous", "ama", "ama_verified"] = "anonymous"  # trust level the session starts at
 
 
 class GuardOnlyResponse(BaseModel):
@@ -92,6 +102,8 @@ class GuardOnlyResponse(BaseModel):
     stage: str  # "prompt" | "response" | "ok"
     guard_prompt: GuardResult
     guard_response: GuardResult | None = None
+    tool_log: list[ToolEvent] = Field(default_factory=list)
+    trust_level: int = 0
     total_latency_ms: float
 
 
@@ -100,4 +112,6 @@ class ShieldedResponse(BaseModel):
     blocked: bool
     input_verdict: Verdict
     output_verdict: Verdict | None = None
+    tool_log: list[ToolEvent] = Field(default_factory=list)
+    trust_level: int = 0
     total_latency_ms: float

@@ -46,6 +46,7 @@ class _Acc:
     next_step: str = ""
     sanitized: str | None = None
     guard_calls: int = 0
+    degraded: bool = False
 
     def add(self, layer: str, res: LayerResult, ms: float) -> None:
         self.trace.append(TraceStep(layer=layer, decision=res.decision, reason=res.reason,
@@ -87,7 +88,7 @@ class ShieldPipeline:
         if acc.decision is not Decision.BLOCK:  # a BLOCK short-circuits: saves quota
             layers = self.input_layers if side == "input" else self.output_layers
             for layer in layers:
-                ctx = LayerContext(session_id, acc.text, side, self.guard, self.llm, guard_result)
+                ctx = LayerContext(session_id, acc.text, side, self.guard, self.llm, guard_result, text)
                 start = time.perf_counter()
                 try:
                     res = await layer.run(ctx)
@@ -114,6 +115,7 @@ class ShieldPipeline:
             trace=acc.trace,
             total_latency_ms=round((time.perf_counter() - t0) * 1000, 1),
             guard_calls=acc.guard_calls,
+            degraded=acc.degraded,
         )
 
     def _judge(self, text: str, result: GuardResult, note: str = "") -> LayerResult:
@@ -160,5 +162,6 @@ class ShieldPipeline:
             res = LayerResult(Decision.BLOCK, f"The Guard check failed ({exc.code}); blocking to be safe.",
                               "Try again in a moment.")
         res.guard_calls = calls
+        acc.degraded = name == "failsafe" or (result is not None and result.is_partial)
         acc.add(name, res, (time.perf_counter() - start) * 1000)
         return result

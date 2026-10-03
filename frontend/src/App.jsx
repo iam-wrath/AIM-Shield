@@ -41,6 +41,7 @@ export default function App() {
   const [right, setRight] = useState([])
   const [busy, setBusy] = useState(false)
   const [session, setSession] = useState(sid())
+  const [persona, setPersona] = useState('anonymous') // trust level the session starts at
   const [fault, setFault] = useState('') // '' | 'outage' | 'partial': demo switch that makes the Guard fail
   const runId = useRef(0)
 
@@ -59,7 +60,7 @@ export default function App() {
 
   const grouped = useMemo(() => {
     const g = {}
-    attacks.forEach((a) => (g[a.weakness] ||= []).push(a))
+    attacks.forEach((a) => (g[a.moment || a.weakness] ||= []).push(a))  // grouped by demo moment
     return g
   }, [attacks])
 
@@ -71,6 +72,7 @@ export default function App() {
     if (a) {
       setText(a.turns.length === 1 ? a.turns[0] : a.turns.join('\n---\n'))
       setFault(a.simulate || '')
+      setPersona(a.persona || 'anonymous')
     }
   }
 
@@ -100,7 +102,7 @@ export default function App() {
       if (runId.current !== my) return
       const m = messages[i]
       addLeft({ role: 'user', text: m }); addRight({ role: 'user', text: m })
-      const body = { session_id: session, message: m, ...(fault ? { simulate: fault } : {}) }
+      const body = { session_id: session, message: m, persona, ...(fault ? { simulate: fault } : {}) }
       const [g, s] = await Promise.all([api('/chat/guard-only', body), api('/chat/shielded', body)])
       if (runId.current !== my) return
       addLeft(leftFromGuardOnly(g)); addRight(rightFromShielded(s))
@@ -182,6 +184,12 @@ export default function App() {
               onKeyDown={(e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) send() }}
             />
             <div className="btns">
+              <select value={persona} onChange={(e) => { setPersona(e.target.value); reset() }} aria-label="Customer session"
+                      title="Who is using the support chat: sets the session's trust level">
+                <option value="anonymous">Customer: anonymous (level 0)</option>
+                <option value="ama">Customer: logged in as Ama (level 1)</option>
+                <option value="ama_verified">Customer: Ama, verified (level 2)</option>
+              </select>
               <select value={fault} onChange={(e) => setFault(e.target.value)} aria-label="Guard fault"
                       title="Demo only: make the Guard fail, to show what each side does (no quota used)">
                 <option value="">Guard: working</option>
@@ -194,10 +202,12 @@ export default function App() {
           </section>
 
           <main className="panes">
-            <Pane title="Guard only" subtitle="What the app does today" messages={left} side="left">
+            <Pane title="Guard only" subtitle="What the app does today" messages={left} side="left"
+                  tools={left.flatMap((m) => m.raw?.tool_log || [])} trust={lastLeft?.raw?.trust_level}>
               {lastLeft && <GuardRaw data={lastLeft.raw} />}
             </Pane>
-            <Pane title="Guard + Aim Shield" subtitle="Our layers beside the Guard" messages={right} side="right">
+            <Pane title="Guard + Aim Shield" subtitle="Our layers beside the Guard" messages={right} side="right"
+                  tools={right.flatMap((m) => m.raw?.tool_log || [])} trust={lastRight?.raw?.trust_level}>
               {lastRight && <ShieldTrace data={lastRight.raw} />}
             </Pane>
           </main>
@@ -207,12 +217,36 @@ export default function App() {
   )
 }
 
-function Pane({ title, subtitle, messages, side, children }) {
+const LEVELS = ['anonymous', 'logged in as Ama', 'verified']
+
+function ToolLog({ events }) {
+  return (
+    <div className="tools">
+      <h3>Tool log <small>(mock KwikPay)</small></h3>
+      {events.length === 0 && <p className="empty">No tool was called.</p>}
+      {events.map((e, i) => {
+        const bad = e.status === 'executed' && !e.authorised
+        const cls = e.status === 'denied' ? 'amber' : bad ? 'red' : 'green'
+        return (
+          <div className="row" key={i}>
+            <span className={`dot ${cls}`} />
+            <b>{e.tool}</b>
+            <code>{Object.values(e.args || {}).join(', ')}</code>
+            <span className={`pill ${cls}`}>{e.status === 'denied' ? 'DENIED' : bad ? 'EXECUTED, NOT AUTHORISED' : 'executed'}</span>
+            <span className="why">{e.detail}</span>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+function Pane({ title, subtitle, messages, side, children, tools = [], trust }) {
   const end = useRef(null)
   useEffect(() => { end.current?.scrollIntoView({ block: 'nearest' }) }, [messages])
   return (
     <section className={`pane ${side}`}>
-      <h2>{title} <small>{subtitle}</small></h2>
+      <h2>{title} <small>{subtitle}</small>{trust !== undefined && <span className="trust">trust {trust}: {LEVELS[trust]}</span>}</h2>
       <div className="chat">
         {messages.length === 0 && <p className="empty">Pick an attack or type a message.</p>}
         {messages.map((m, i) => (
@@ -223,6 +257,7 @@ function Pane({ title, subtitle, messages, side, children }) {
         ))}
         <div ref={end} />
       </div>
+      <ToolLog events={tools} />
       {children}
     </section>
   )

@@ -1,6 +1,10 @@
-"""Canonicaliser (W3): undo disguises, then re-check the decoded text with the Guard.
+"""Base64 decoder (W3): decode base64 blobs, then re-check the decoded text with the Guard.
 
-`canonicalise()` is pure and also used by the fail-safe local risk check.
+Our probes showed the Guard misses base64 but catches the other encodings (leetspeak, spaced letters,
+homoglyphs, zero-width, reversed text, hex, ROT13), so the Guard-facing layer only handles base64.
+
+`canonicalise()` can undo every disguise. It stays because the fail-safe's LOCAL risk check
+(failsafe.py) uses all of it when the Guard is down; there it costs no quota.
 """
 from __future__ import annotations
 
@@ -87,7 +91,10 @@ def _deleet_token(m: re.Match) -> str:
     return tok
 
 
-def canonicalise(text: str) -> Canon:
+def canonicalise(text: str, base64_only: bool = False) -> Canon:
+    if base64_only:
+        decoded = B64.sub(lambda m: _decode_b64(m.group(0)) or m.group(0), text)
+        return Canon(decoded, ["base64"] if decoded != text else [])
     transforms: list[str] = []
     out = unicodedata.normalize("NFKC", text)
     if out != text:
@@ -138,12 +145,12 @@ def canonicalise(text: str) -> Canon:
     return Canon(out, transforms)
 
 
-class Canonicaliser(Layer):
-    name = "canonicaliser"
+class Base64Decoder(Layer):
+    name = "base64_decoder"
     side = "input"
 
     async def run(self, ctx: LayerContext) -> LayerResult:
-        canon = canonicalise(ctx.text)
+        canon = canonicalise(ctx.text, base64_only=True)
         if canon.text == ctx.text:
             return LayerResult()
         what = ", ".join(canon.transforms)
@@ -156,7 +163,7 @@ class Canonicaliser(Layer):
         if not result.allowed:
             return LayerResult(
                 Decision.BLOCK,
-                f"The message was disguised ({what}). Once decoded it was flagged: {flag_reason(result)}{note}",
+                f"The message hid its real content in {what}. Once decoded it was flagged: {flag_reason(result)}{note}",
                 "Ask your question in plain text.",
                 guard_calls=calls,
             )

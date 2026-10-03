@@ -43,7 +43,7 @@ def test_guard_only_happy_path(client, llm):
     assert r["reply"] == "Mid-sem is in week 8." and not r["blocked"] and r["stage"] == "ok"
     assert r["guard_prompt"]["request_id"] == "r1" and r["guard_response"]["request_id"] == "r2"
     msgs, system = llm.calls[0]
-    assert "AIM-CANARY" in system and msgs[-1].content == BODY["message"]
+    assert "KP-REV" in system and msgs[-1].content == BODY["message"]
 
 
 @respx.mock

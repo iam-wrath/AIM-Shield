@@ -34,8 +34,8 @@ class Settings(BaseSettings):
     llm_model: str = ""
     llm_timeout: float = 60.0
 
-    # Aim AI assistant
-    canary_token: str = "AIM-CANARY-7f3a91c2"  # synthetic secret in the system prompt
+    # KwikPay Assist (the system we protect)
+    canary_token: str = "KP-REV-7f3a91c2"  # synthetic secret in the system prompt
 
     # Paths
     rag_dir: str = str(REPO_ROOT / "rag_docs")

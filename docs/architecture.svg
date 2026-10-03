@@ -6,9 +6,9 @@
   <rect x="190" y="60" width="210" height="64" rx="8" fill="#f1f1f1" stroke="#888"/><text x="295" y="88" text-anchor="middle">SecureAI Guard (Model Armor)</text><text x="295" y="108" text-anchor="middle" font-size="12">/v1/check/prompt</text>
   <rect x="190" y="150" width="210" height="150" rx="8" fill="#e6f5ec" stroke="#1b8a4b"/>
   <text x="295" y="172" text-anchor="middle" font-weight="600">Aim layers (input)</text>
-  <text x="295" y="196" text-anchor="middle" font-size="13">Ghana Lens · Canonicaliser</text>
+  <text x="295" y="196" text-anchor="middle" font-size="13">Ghana Lens · Identity Binding</text>
   <text x="295" y="216" text-anchor="middle" font-size="13">Conversation Memory</text>
-  <text x="295" y="236" text-anchor="middle" font-size="13">Language Bridge · Chunker</text>
+  <text x="295" y="236" text-anchor="middle" font-size="13">Base64 decoder · Chunker</text>
   <text x="295" y="256" text-anchor="middle" font-size="13">Fail-safe Policy · RAG screen</text>
   <text x="295" y="284" text-anchor="middle" font-size="12" fill="#555">local first, ≤ ~3 Guard calls</text>
   <rect x="470" y="150" width="120" height="60" rx="8" fill="#fdf3dd" stroke="#b7791f"/><text x="530" y="178" text-anchor="middle">Verdict</text><text x="530" y="196" text-anchor="middle" font-size="12">ALLOW·WARN·REDACT·BLOCK</text>

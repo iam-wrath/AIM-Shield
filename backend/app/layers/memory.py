@@ -20,7 +20,10 @@ CUE = re.compile(
     r"\bpart\s+[a-z0-9]\b|\bcombine\b|\bconcatenat\w*|\bjoin\s+(?:them|these|the|part)\b|"
     r"\bput\s+(?:them|it|these)\s+together\b|\bcontinue\b|\bnow\s+(?:follow|do|run|execute)\b|"
     r"\bfollow\s+(?:a|the)\s*(?:\+|and)\s*b\b|"
-    r"\b[a-z_]\w*\s*=\s*[\"'`]|\bstep\s*\d\b|\bremember\s+(?:this|that)\b|\bfrom\s+before\b",
+    r"\b[a-z_]\w*\s*=\s*[\"'`]|\bstep\s*\d\b|\bremember\s+(?:this|that)\b|\bfrom\s+before\b|"
+    # social-engineering build-up: staff claims, "by mistake", then the money request
+    r"\breverse\b|\breversal\b|\bby\s+mistake\b|\bwrong\s+number\b|\bsend\s+(?:it|am)\s+back\b|"
+    r"\b(?:i\s+(?:be|am)|we\s+are)\s+(?:the\s+|an?\s+)?(?:agent|staff|admin|manager)\b|\bhead\s+office\b",
     re.I,
 )
 

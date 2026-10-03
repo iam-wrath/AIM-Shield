@@ -28,7 +28,13 @@ INJECTION_PATTERNS = [
 # "send your MoMo PIN to ..." style social engineering (the Guard allowed these in probes).
 SOLICIT = re.compile(
     r"\b(?:send|share|give|tell|enter|provide|submit|text|reply|confirm|verify|type|forward|disclose)\w*\b"
-    r"[^.\n]{0,80}?\b(?:pin|password|passcode|otp|one[- ]time (?:code|password))\b",
+    r"[^.\n]{0,80}?\b(?:pin|password|passcode)\b",
+    re.I,
+)
+# Typing a one-time code into the support chat is the normal flow. Sending it to a number is the attack.
+SOLICIT_OTP = re.compile(
+    r"\b(?:send|share|forward|give|tell|read|text)\w*\b[^.\n]{0,60}\b(?:otp|one[- ]time (?:code|password)|code)\b"
+    r"[^.\n]{0,40}\bto\b\s*(?:\+?\d|(?:this|that|the|another) number)",
     re.I,
 )
 # A sentence that warns about this ("never share your PIN", "if someone asks ... it's a scam") is advice, not a request.
@@ -44,9 +50,35 @@ SENTENCE = re.compile(r"(?<=[.!?])\s+|\n+")
 def solicits_secret(text: str) -> bool:
     """True when a sentence asks the reader to hand over a PIN/password (warnings against it are fine)."""
     for sentence in SENTENCE.split(text):
-        if SOLICIT.search(sentence) and not CAUTION.search(sentence):
+        if (SOLICIT.search(sentence) or SOLICIT_OTP.search(sentence)) and not CAUTION.search(sentence):
             return True
     return False
+
+
+# Asking the customer for a whole card number is never part of a KwikPay flow.
+ASK_CARD = re.compile(
+    r"\b(?:send|share|give|tell|enter|provide|submit|type|confirm|read)\w*\b[^.\n]{0,60}"
+    r"\b(?:full\s+|complete\s+|whole\s+)?(?:debit\s+|credit\s+|ghana\s+)?card\s+(?:number|details|no\b)",
+    re.I,
+)
+# What a hijacked agent says: money sent to a stranger, or verification skipped.
+SOCIAL_ENGINEERING = [
+    re.compile(p, re.I) for p in (
+        r"\bsend\w*\s+(?:the\s+)?(?:money|funds|it|am|amount|payment)\s+back\s+to\s+(?:\+?\d|(?:this|that|the following|another|a)\s+number)",
+        r"\breverse\w*\b[^.\n]{0,40}\bto\s+(?:\+?\d|(?:this|that|another|the following|a)\s+number)",
+        r"\b(?:no|without)\s+(?:need\s+(?:for|to)\s+)?(?:identity\s+)?verif\w+|\bskip\w*\s+(?:the\s+)?verif\w+",
+        r"\b(?:transfer|send|pay)\w*\b[^.\n]{0,40}\bto\s+(?:this|that|the following)\s+number\b[^.\n]{0,60}\b(?:confirm|verify|secure)",
+    )
+]
+
+
+def asks_for_card_number(text: str) -> bool:
+    return any(ASK_CARD.search(s) and not CAUTION.search(s) for s in SENTENCE.split(text))
+
+
+def social_engineering(text: str) -> bool:
+    """True when a sentence tells someone to move money to a stranger or skip verification."""
+    return any(any(p.search(s) for p in SOCIAL_ENGINEERING) and not CAUTION.search(s) for s in SENTENCE.split(text))
 
 
 @dataclass
@@ -60,13 +92,15 @@ def local_risk(text: str) -> LocalRisk:
     variants = [text, canonicalise(text).text]
     for v in variants:
         for p in ghana_lens.scan(v):
-            if p.kind == "credential" and p.label not in risk.reasons:
+            if p.kind in ("credential", "pin") and p.label not in risk.reasons:
                 risk.reasons.append(p.label)
         for pat in INJECTION_PATTERNS:
             if pat.search(v) and "instruction-override phrase" not in risk.reasons:
                 risk.reasons.append("instruction-override phrase")
         if solicits_secret(v) and "request for a PIN or password" not in risk.reasons:
             risk.reasons.append("request for a PIN or password")
+        if social_engineering(v) and "social-engineering instruction" not in risk.reasons:
+            risk.reasons.append("social-engineering instruction")
     risk.high = bool(risk.reasons)
     return risk
 
