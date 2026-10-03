@@ -1,0 +1,12 @@
+services:
+  aim-shield:
+    build: .
+    env_file: .env
+    ports:
+      - "8000:8000"
+    volumes:
+      - aim-data:/data
+    environment:
+      DB_PATH: /data/aim_shield.db
+volumes:
+  aim-data:

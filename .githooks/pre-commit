@@ -1,0 +1,35 @@
+#!/bin/sh
+# Blocks commits that contain secrets. Enabled by: git config core.hooksPath .githooks
+# Uses gitleaks if installed, and ALWAYS runs the built-in grep check below.
+
+fail=0
+
+# 1. Never allow a real .env to be staged.
+if git diff --cached --name-only --diff-filter=ACM | grep -Eq '(^|/)\.env($|\.[^/]*$)' \
+   && git diff --cached --name-only --diff-filter=ACM | grep -E '(^|/)\.env($|\.[^/]*$)' | grep -vq '\.env\.example$'; then
+  echo "pre-commit: refusing to commit a .env file." >&2
+  fail=1
+fi
+
+# 2. gitleaks, if available.
+if command -v gitleaks >/dev/null 2>&1; then
+  gitleaks git --pre-commit --staged --redact >/dev/null 2>&1 || \
+  gitleaks protect --staged --redact >/dev/null 2>&1 || {
+    echo "pre-commit: gitleaks found a possible secret (run: gitleaks git --pre-commit --staged -v)." >&2
+    fail=1
+  }
+fi
+
+# 3. Built-in check on added lines (skips this hook file itself).
+added=$(git diff --cached -U0 --no-color -- . ':(exclude).githooks/*' | grep -E '^\+[^+]' || true)
+if printf '%s\n' "$added" | grep -Eq 'sai_[A-Za-z0-9_-]{8,}|sk-proj-[A-Za-z0-9_-]{40,}|Bearer[[:space:]]+sai_|GUARD_TOKEN[[:space:]]*[=:][[:space:]]*["'\'']?[^[:space:]"'\'']+'; then
+  echo "pre-commit: staged changes look like they contain a Guard token (sai_... or GUARD_TOKEN=<value>)." >&2
+  printf '%s\n' "$added" | grep -En 'sai_[A-Za-z0-9_-]{8,}|sk-proj-[A-Za-z0-9_-]{40,}|Bearer[[:space:]]+sai_|GUARD_TOKEN[[:space:]]*[=:][[:space:]]*["'\'']?[^[:space:]"'\'']+' | sed -E 's/(sai_[A-Za-z0-9_-]{3})[A-Za-z0-9_-]*/\1***/g' >&2
+  fail=1
+fi
+
+if [ "$fail" -ne 0 ]; then
+  echo "pre-commit: commit blocked. If this is a false positive, fix the text; do not bypass for real tokens." >&2
+  exit 1
+fi
+exit 0

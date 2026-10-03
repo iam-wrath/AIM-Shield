@@ -1,0 +1,4 @@
+id,weakness,allowed,flags,status,confidence,latency_ms,request_id,error,endpoint
+w2c-1,W2,False,injection,complete,HIGH,89,46d55a1ba35d,,prompt
+w2c-2,W2,True,,complete,,53,9e52be34be69,,prompt
+w2c-3,W2,False,injection,complete,HIGH,73,807215efe8f2,,prompt

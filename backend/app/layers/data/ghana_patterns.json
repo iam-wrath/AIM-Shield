@@ -1,0 +1,53 @@
+{
+  "_note": "STAND-IN patterns written by Kwaku. Christabel: extend this list (name, regex, kind=credential|pii, label). Synthetic data only.",
+  "patterns": [
+    {
+      "name": "ghana_card",
+      "kind": "pii",
+      "label": "Ghana Card number",
+      "regex": "(?i)\\bGHA-?\\d{9}-?\\d\\b"
+    },
+    {
+      "name": "momo_number",
+      "kind": "pii",
+      "label": "mobile money / phone number",
+      "regex": "(?<!\\d)(?:\\+233|0)[\\s-]?[25]\\d[\\s-]?\\d{3}[\\s-]?\\d{4}(?!\\d)"
+    },
+    {
+      "name": "momo_pin",
+      "kind": "credential",
+      "label": "MoMo or account PIN",
+      "regex": "(?i)\\b(?:momo\\s+|mobile\\s+money\\s+)?pin\\b[^\\d\\n]{0,15}\\d{4,6}\\b"
+    },
+    {
+      "name": "knust_index",
+      "kind": "pii",
+      "label": "KNUST index / student number",
+      "regex": "(?i)\\b(?:knust\\s+)?(?:index|student)\\s*(?:no\\.?|number|id|#)?\\s*(?:is\\s*)?[:#=]?\\s*\\d{7,8}\\b"
+    },
+    {
+      "name": "ghana_tin",
+      "kind": "pii",
+      "label": "Ghana TIN",
+      "regex": "\\b[PCG]\\d{10}\\b"
+    },
+    {
+      "name": "api_key_sk",
+      "kind": "credential",
+      "label": "API key (sk-)",
+      "regex": "\\bsk-[A-Za-z0-9_-]{16,}"
+    },
+    {
+      "name": "api_key_github",
+      "kind": "credential",
+      "label": "GitHub token (ghp_)",
+      "regex": "\\bghp_[A-Za-z0-9]{20,}"
+    },
+    {
+      "name": "api_key_aws",
+      "kind": "credential",
+      "label": "AWS access key (AKIA)",
+      "regex": "\\bAKIA[0-9A-Z]{16}\\b"
+    }
+  ]
+}
