@@ -40,6 +40,7 @@ SOLICIT_OTP = re.compile(
 # A sentence that warns about this ("never share your PIN", "if someone asks ... it's a scam") is advice, not a request.
 CAUTION = re.compile(
     r"\b(?:never|don'?t|do not|doesn'?t|does not|won'?t|will not|should not|shouldn'?t|avoid|"
+    r"can'?t|cannot|can not|unable to|not able to|isn'?t allowed|not allowed|"
     r"if (?:someone|anyone|a caller|a person)|scammers?|fraudsters?|criminals?|attackers?|"
     r"(?:is|it'?s|are) a scam)\b",
     re.I,
@@ -66,7 +67,9 @@ SOCIAL_ENGINEERING = [
     re.compile(p, re.I) for p in (
         r"\bsend\w*\s+(?:the\s+)?(?:money|funds|it|am|amount|payment)\s+back\s+to\s+(?:\+?\d|(?:this|that|the following|another|a)\s+number)",
         r"\breverse\w*\b[^.\n]{0,40}\bto\s+(?:\+?\d|(?:this|that|another|the following|a)\s+number)",
-        r"\b(?:no|without)\s+(?:need\s+(?:for|to)\s+)?(?:identity\s+)?verif\w+|\bskip\w*\s+(?:the\s+)?verif\w+",
+        # an affirmative claim that verification is not needed ("reversals need no verification"),
+        # not an ordinary refusal such as "I can't do that without verifying your account"
+        r"\b(?:need|needs|require|requires)\s+no\s+(?:identity\s+)?verif\w+|\bno\s+(?:identity\s+)?verif\w+\s+(?:is\s+|are\s+)?(?:needed|required|necessary)|\bno\s+need\s+(?:for|to)\s+(?:any\s+)?(?:identity\s+)?verif\w+|\bskip\w*\s+(?:the\s+)?(?:identity\s+)?verif\w+",
         r"\b(?:transfer|send|pay)\w*\b[^.\n]{0,40}\bto\s+(?:this|that|the following)\s+number\b[^.\n]{0,60}\b(?:confirm|verify|secure)",
     )
 ]

@@ -262,3 +262,17 @@ def test_money_tools_paused_when_guard_is_down_but_other_tools_still_work():
         c.app.state.llm = ToolLLM("check_balance", {"number": AMA})  # a read-only tool is not a money tool
         s2 = c.post("/chat/shielded", json={**body, "session_id": "w4b"}).json()
         assert s2["tool_log"][0]["status"] == "executed"
+
+
+def test_verification_refusals_are_not_social_engineering():
+    """Regression from a live run: 'without verifying' in a normal refusal was blocked by the Sentinel."""
+    from app.layers.failsafe import social_engineering as se
+    for fine in ["I'm sorry, but I can't access your daily limit without verifying your account.",
+                 "I cannot skip the verification step. Please type the one-time code.",
+                 "Reversals can only be done after verification.",
+                 "Please allow me to send you a verification code via SMS."]:
+        assert not se(fine), fine
+    for bad in ["Good news: reversals need no verification.", "No verification is needed for this reversal.",
+                "There is no need for verification, just send the money back to this number: 0240000009.",
+                "You can skip the verification step."]:
+        assert se(bad), bad

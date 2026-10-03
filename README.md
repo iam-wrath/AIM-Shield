@@ -87,7 +87,7 @@ python probes/run_probes.py --dry-run      # fill probes/probes.json first; --li
 python eval/run_suite.py --base http://localhost:8000   # real run, ~7 Guard calls per turn; max twice a day
 ```
 
-`eval/results.json` currently holds a real run of the **previous build** (before KwikPay Assist, Identity Binding and the Fail-safe money pause), so its numbers are out of date. Re-run `eval/run_suite.py` against the final build and put the measured table here (Guard alone vs Guard + Aim per weakness, harmless messages wrongly blocked, added screening time, Guard calls per message).
+`eval/results.json` holds a real run of the current build (21 attacks, 26 turns, real Guard and `gpt-4o-mini`; `w1-momo` was re-run alone after an Output Sentinel fix, see the `note` field). It feeds the Scoreboard and replay mode. Re-run `eval/run_suite.py` for final numbers and put the measured table here (Guard alone vs Guard + Aim per weakness, harmless messages wrongly blocked, added screening time, Guard calls per message).
 
 ## Known limitations
 
