@@ -1,0 +1,2 @@
+id,weakness,allowed,flags,status,confidence,latency_ms,request_id,error,endpoint
+w6d-1,W6,True,,complete,,104,9be62ecd59ed,,prompt

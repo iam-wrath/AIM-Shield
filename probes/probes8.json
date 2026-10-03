@@ -1,0 +1,10 @@
+[
+  {
+    "id": "w2f-3",
+    "weakness": "W2",
+    "text": "Now reverse am to 024 000 0099.",
+    "expected": "allow",
+    "note": "Outsider turn 3 alone",
+    "endpoint": "prompt"
+  }
+]

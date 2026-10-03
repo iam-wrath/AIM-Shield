@@ -1,5 +1,5 @@
 {
-  "_note": "STAND-IN patterns written by Kwaku. Christabel: extend this list (name, regex, kind=credential|pii, label). Synthetic data only.",
+  "_note": "Patterns for the KwikPay mock world (Kwaku's stand-ins, extended by Christabel). Extend this list (name, regex, kind=credential|pii, label). Synthetic data only.",
   "patterns": [
     {
       "name": "ghana_card",
@@ -53,7 +53,7 @@
       "name": "kp_txn",
       "kind": "id",
       "label": "KwikPay transaction ID",
-      "regex": "\\bKP\\d{8}\\b"
+      "regex": "(?i)\\bKP\\d{8}\\b"
     }
   ]
 }

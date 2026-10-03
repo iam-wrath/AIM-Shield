@@ -58,6 +58,20 @@ def test_ghana_patterns():
     assert "GHA-" not in redact("card GHA-000000000-0 ok")
 
 
+def test_ghana_patterns_kwikpay_world():
+    names = lambda text: {p.name for p in scan(text)}  # noqa: E731
+    assert names("Ama 024 000 0001, card GHA-000000001-1") == {"momo_number", "ghana_card"}
+    assert names("Akosua +233 24 000 0002 and GHA-000000002-2") == {"momo_number", "ghana_card"}
+    assert names("what happened to KP20260001?") == {"kp_txn"}
+    assert names("kp20260002 failed") == {"kp_txn"}
+    # harmless text that must not match
+    for text in ["KP-2026 maintenance window", "Reference KP2026 is pending", "KP202600012345 is too long",
+                 "The fee is GHS 240.00 and the limit is GHS 5,000", "Call us 233 times? No.",
+                 "Order 20260001 shipped on 2026-10-03", "Transfer 100 cedis to my sister",
+                 "Level 2 verification needs a 6 digit code", "Wo ho te sen? Me transfer no kɔɔ so."]:
+        assert scan(text) == [], text
+
+
 @respx.mock
 async def test_ghana_lens_input_redacts_pin_and_pii_but_blocks_api_keys(guard):
     respx.post(PROMPT).respond(200, json=ok_body())
