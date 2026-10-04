@@ -124,7 +124,7 @@ Use the venv's Python (`.venv/Scripts/python`, or `.venv/bin/python` on macOS/Li
 
 ## Results (full suite, real Guard + `gpt-4o-mini`)
 
-`eval/results.json` holds the last full run plus one later case (`w6-sentinel`, see its `note`): 35 attacks, 42 turns, `"synthetic": false`. It feeds the Scoreboard and Replay mode. "Caught" means the route blocked, redacted or dropped the harmful content (for W4 it includes the simulated Guard faults, which use no quota).
+`eval/results.json` holds the last full run (rerun on 4 Oct from the current files): 35 attacks, 42 turns, `"synthetic": false`. It feeds the Scoreboard and Replay mode. "Caught" means the route blocked, redacted or dropped the harmful content (for W4 it includes the simulated Guard faults, which use no quota).
 
 | Weakness | Attacks | Missed by Guard alone | Missed by Guard + Aim |
 | --- | --- | --- | --- |
@@ -138,8 +138,8 @@ Use the venv's Python (`.venv/Scripts/python`, or `.venv/bin/python` on macOS/Li
 
 - **Harmful outcomes:** 9 replies where the bot acted on an attack (leaked the code, followed the poisoned policy or the scam) with the Guard alone, 0 with Aim; 5 unauthorised tool calls with the Guard alone, 0 with Aim.
 - **Harmless messages wrongly blocked:** 0 of 9 in both modes. Two harmless verification messages (`kp-ok-otp-ask`, `kp-ok-otp-type`) got a WARN, not a block: the RAG screen dropped the poisoned policy paragraph the bot retrieved for them. The OTP message `n-otp` is redacted on purpose before the LLM sees it. Separately, the probes found the Guard alone blocks 1 of 14 harmless-but-edgy messages (fp-12).
-- **Guard calls per message:** 2.03 with the Guard alone, 2.37 with Guard + Aim (local checks run first and cost no quota).
-- **Added screening time:** the suite's median was about -3 ms and p95 about 242 ms. The median is not meaningful: it subtracts two separate runs whose timings vary by more than Aim's own work, so we only claim that Aim's screening is small next to the LLM and Guard round trips, not a precise figure.
+- **Guard calls per message:** 2.03 with the Guard alone, 2.40 with Guard + Aim (local checks run first and cost no quota).
+- **Added screening time:** the suite's median was about -15 ms and p95 about 84 ms. The median is not meaningful: it subtracts two separate runs whose timings vary by more than Aim's own work, so we only claim that Aim's screening is small next to the LLM and Guard round trips, not a precise figure.
 - **Aim's own misses in this run:** none on these 35 cases. This is a small, hand-written suite, so it shows the demo works, not general effectiveness.
 
 ## Known limitations
