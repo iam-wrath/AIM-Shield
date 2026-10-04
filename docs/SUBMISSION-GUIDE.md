@@ -4,16 +4,14 @@ Deadline: **Sunday 4 Oct**. Presentation: **Monday 5 Oct**. The organisers set u
 
 All commands are for Git Bash from the repo root. Everything marked "expect" tells you what a correct result looks like. If a result differs, stop and fix it before going on.
 
-Already done in the folder: tests pass (90), secret scan clean, dependency audits clean, caches and logs removed, line endings normalised to LF with a `.gitattributes`, the pre-commit hook fixed (it had Windows line endings and would have failed on Mac/Linux), Docker build and run verified, README has a "Quick start for the organisers". See `docs/SECURITY-REVIEW.md` and `docs/CLEANUP.md`.
-
+Already done in the folder: tests pass (90), secret scan clean, dependency audits clean, caches and logs removed, line endings normalised to LF with a `.gitattributes`, the pre-commit hook fixed (it had Windows line endings and would have failed on Mac/Linux), Docker build and run verified, README has a "Quick start for the organisers".
 ---
 
 ## Step 1. Decide four things first
 1. **Public or private repo?** Private is safer (the code runs against a shared Guard). If private, you must invite the organisers (ask them which GitHub accounts). If public, only the secret checks below stand between you and a leak.
 2. **How do you tell the organisers where it is?** Use the same channel they used to give you the brief. Send the repo URL **and the tag** from Step 8.
-3. **Which internal files to drop.** These are working notes for the two of you, not for judges. Delete before the first commit, last of all this guide:
-   `docs/CHRISTABEL-TASKS.md`, `docs/CLEANUP.md`, `docs/SUBMISSION-GUIDE.md`.
-   Keep: `docs/SECURITY-REVIEW.md` (the README links to it), `docs/probe-findings.md`, `docs/architecture.svg`.
+3. **Which internal files to drop.** The other internal notes are already deleted. This guide is a working note for the two of you, not for judges: delete `docs/SUBMISSION-GUIDE.md` last, before the first commit.
+   Keep: `docs/probe-findings.md`, `docs/architecture.svg`.
 4. **License.** Optional. With no license file nobody has a licence to reuse the code, which is fine for a hackathon. Add a `LICENSE` (MIT is the usual choice) only if you want people to reuse it.
 
 ## Step 2. Check the folder before committing
@@ -48,7 +46,7 @@ If the commit succeeded, the hook is not running: re-check the `hooksPath` line 
 ```bash
 git add -A
 git status --short | head -120
-git ls-files | wc -l                                                      # expect: 118 once the 3 internal docs are deleted (121 if you kept them)
+git ls-files | wc -l                                                      # expect: roughly 115 to 120; the point is that nothing like .env, a db, a log or node_modules is in the list
 git ls-files | grep -E "(^|/)\.env$" || echo ".env not tracked"           # expect: .env not tracked
 git ls-files | grep -E "node_modules|\.venv|(^|/)dist/|\.db$|\.log$|__pycache__" || echo "no build/local files tracked"   # expect: no build/local files tracked
 git add --renormalize .                                                   # makes git re-apply the LF rule to every file
@@ -56,7 +54,7 @@ git update-index --chmod=+x .githooks/pre-commit                          # keep
 ```
 Check the essentials are tracked (prints nothing when all are present):
 ```bash
-for f in README.md Dockerfile docker-compose.yml .env.example .gitignore .gitattributes .dockerignore .githooks/pre-commit backend/requirements.txt frontend/package.json frontend/package-lock.json eval/results.json eval/run_suite.py docs/probe-findings.md docs/architecture.svg docs/SECURITY-REVIEW.md attacks/starter.json attacks/christabel.json rag_docs/reversal_policy_UPDATED.md backend/app/main.py backend/replay_server.py; do git ls-files --error-unmatch "$f" >/dev/null 2>&1 || echo "MISSING: $f"; done
+for f in README.md Dockerfile docker-compose.yml .env.example .gitignore .gitattributes .dockerignore .githooks/pre-commit backend/requirements.txt frontend/package.json frontend/package-lock.json eval/results.json eval/run_suite.py docs/probe-findings.md docs/architecture.svg attacks/starter.json attacks/christabel.json rag_docs/reversal_policy_UPDATED.md backend/app/main.py backend/replay_server.py; do git ls-files --error-unmatch "$f" >/dev/null 2>&1 || echo "MISSING: $f"; done
 ```
 
 ## Step 5. Commit

@@ -1,7 +1,7 @@
 """Regenerates attacks/starter.json: the demo library, organised by the plan's six moments (section 6).
 
 Synthetic data only. The "mock world" (Ama, her sister Akosua, KP transaction IDs, trust levels) is defined in
-backend/app/kwikpay.py and docs/CHRISTABEL-TASKS.md. Christabel: add more files next to starter.json
+backend/app/kwikpay.py. To extend the library, add more files next to starter.json
 (attacks/*.json); GET /attacks loads them all and the lab groups them by `moment` (or `weakness`).
 
 Fields: id, weakness (W1..W6, scored in the scoreboard), moment (dropdown group), title, expected
