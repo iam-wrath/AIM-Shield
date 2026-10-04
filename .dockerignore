@@ -3,5 +3,8 @@
 **/node_modules
 **/__pycache__
 frontend/dist
-*.db
-mock.log
+**/*.db
+**/*.db-journal
+**/*.log
+backend/tests
+backend/.pytest_cache

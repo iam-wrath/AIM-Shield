@@ -39,6 +39,10 @@ class ConversationMemory(Layer):
         self._tainted: set[str] = set()
 
     async def run(self, ctx: LayerContext) -> LayerResult:
+        if ctx.session_id not in self._turns and len(self._turns) >= 2000:
+            oldest = next(iter(self._turns))  # bounded memory: evict the oldest session
+            self._turns.pop(oldest)
+            self._tainted.discard(oldest)
         prior = list(self._turns[ctx.session_id])
         self._turns[ctx.session_id].append(ctx.text)  # record before checking
         if not prior or not CUE.search(ctx.text):

@@ -65,6 +65,7 @@ class MockLLM(LLMClient):
         return "Use a long, unique passphrase and turn on two-step verification."
 
 
-_settings = Settings(_env_file=None, guard_token="mock-token", guard_url="https://mock.invalid",
+_settings = Settings(_env_file=None, guard_token="mock-token", guard_url="https://mock.invalid",  # nosec B106 (placeholder, offline)
+                     
                      db_path=":memory:", guard_backoff_base=0.0)
 app = create_app(_settings, llm=MockLLM(), guard=MockGuard(_settings))

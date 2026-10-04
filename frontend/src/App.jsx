@@ -1,49 +1,61 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { api, sid, sleep, store } from './lib/api.js'
+import { momentName, momentNumber } from './lib/moments.js'
+import { aimOutcome, guardOutcome } from './lib/outcome.js'
+import TopBar from './components/TopBar.jsx'
+import ScenarioRail from './components/ScenarioRail.jsx'
+import Composer from './components/Composer.jsx'
+import Pane from './components/Pane.jsx'
+import Pipeline from './components/Pipeline.jsx'
+import GuardSummary from './components/GuardSummary.jsx'
+import Scoreboard from './components/Scoreboard.jsx'
 
-const sid = () => Math.random().toString(36).slice(2, 10)
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+const joinTurns = (turns) => (turns.length === 1 ? turns[0] : turns.join('\n---\n'))
+const lastBot = (list) => [...list].reverse().find((m) => m.role === 'bot')
+const lastRaw = (list) => [...list].reverse().find((m) => m.role === 'bot' && m.raw)
 
-async function api(path, body) {
-  try {
-    const res = await fetch(path, body
-      ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
-      : undefined)
-    const data = await res.json().catch(() => ({}))
-    return { ok: res.ok, status: res.status, data }
-  } catch (e) {
-    return { ok: false, status: 0, data: { error: 'network', detail: String(e) } }
-  }
+function fromGuardOnly({ ok, status, data }, replayHarm = false) {
+  if (!ok) return { role: 'bot', kind: 'error', text: `Guard error ${status}: ${data.error || ''} ${data.detail || ''}`.trim(), raw: null }
+  if (data.blocked) return { role: 'bot', kind: 'blocked', text: `Blocked by the Guard at the ${data.stage} check.`, raw: data }
+  return { role: 'bot', kind: 'ok', text: data.reply, raw: data, replayHarm }
 }
 
-const tone = (d) => (d === 'BLOCK' ? 'red' : d === 'WARN' || d === 'REDACT' ? 'amber' : 'green')
-
-function usageText(u) {
-  if (!u) return 'quota: …'
-  if (u.error) return 'quota: unavailable'
-  const pick = (...keys) => keys.map((k) => u[k]).find((v) => typeof v === 'number')
-  const used = pick('used_today', 'used', 'requests_today', 'count')
-  const limit = pick('daily_limit', 'limit', 'day_limit', 'max')
-  const left = pick('remaining', 'remaining_today', 'day_remaining')
-  if (used !== undefined && limit !== undefined) return `quota: ${used}/${limit} today`
-  if (left !== undefined) return `quota: ${left} left today`
-  return 'quota: ' + JSON.stringify(u).slice(0, 60)
+function fromShielded({ ok, status, data }) {
+  if (!ok) return { role: 'bot', kind: 'error', text: `Error ${status}: ${data.error || ''} ${data.detail || ''}`.trim(), raw: null }
+  return { role: 'bot', kind: data.blocked ? 'blocked' : 'ok', text: data.reply, raw: data }
 }
 
 export default function App() {
   const [tab, setTab] = useState('lab')
+  const [live, setLive] = useState(true)
   const [attacks, setAttacks] = useState([])
   const [replay, setReplay] = useState(null)
-  const [useReplay, setUseReplay] = useState(false)
   const [usage, setUsage] = useState(null)
+  const [moment, setMoment] = useState('')
   const [selected, setSelected] = useState('')
   const [text, setText] = useState('')
+  const [persona, setPersona] = useState('anonymous') // the trust level the session starts at
+  const [demo, setDemo] = useState('') // '' | outage | partial | rag_off: the one demo switch the API supports
   const [left, setLeft] = useState([])
   const [right, setRight] = useState([])
+  const [pending, setPending] = useState({ left: false, right: false })
+  const [progress, setProgress] = useState(null)
   const [busy, setBusy] = useState(false)
   const [session, setSession] = useState(sid())
-  const [persona, setPersona] = useState('anonymous') // trust level the session starts at
-  const [fault, setFault] = useState('') // '' | 'outage' | 'partial': demo switch that makes the Guard fail
+  const [theme, setTheme] = useState(() => (document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light'))
+  const [present, setPresent] = useState(() => document.documentElement.dataset.present === 'on')
   const runId = useRef(0)
+  const ranLibrary = useRef(false) // the last run was a library attack, so typed text should start fresh
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme
+    store.set('aim-theme', theme)
+  }, [theme])
+  useEffect(() => {
+    if (present) document.documentElement.dataset.present = 'on'
+    else delete document.documentElement.dataset.present
+    store.set('aim-present', present ? 'on' : 'off')
+  }, [present])
 
   useEffect(() => {
     api('/attacks').then((r) => r.ok && setAttacks(r.data))
@@ -52,291 +64,232 @@ export default function App() {
 
   const pollUsage = useCallback(() => api('/usage').then((r) => setUsage(r.ok ? r.data : { error: true })), [])
   useEffect(() => {
-    if (useReplay) return
+    if (!live) return
     pollUsage()
     const t = setInterval(pollUsage, 15000)
     return () => clearInterval(t)
-  }, [useReplay, pollUsage])
+  }, [live, pollUsage])
 
-  const grouped = useMemo(() => {
-    const g = {}
-    attacks.forEach((a) => (g[a.moment || a.weakness] ||= []).push(a))  // grouped by demo moment
-    return g
+  const groups = useMemo(() => {
+    const map = new Map()
+    attacks.forEach((a) => {
+      const label = a.moment || a.weakness
+      if (!map.has(label)) map.set(label, { label, number: momentNumber(label), name: momentName(label), attacks: [] })
+      map.get(label).attacks.push(a)
+    })
+    return [...map.values()].sort((a, b) => (a.number || 99) - (b.number || 99) || a.label.localeCompare(b.label))
   }, [attacks])
 
   const current = attacks.find((a) => a.id === selected)
+  const libraryText = current ? joinTurns(current.turns) : null
+  const isLibrary = current && text === libraryText
 
-  function onSelect(id) {
-    setSelected(id)
-    const a = attacks.find((x) => x.id === id)
-    if (a) {
-      setText(a.turns.length === 1 ? a.turns[0] : a.turns.join('\n---\n'))
-      setFault(a.simulate || '')
-      setPersona(a.persona || 'anonymous')
-    }
+  function reset(newSession) {
+    ranLibrary.current = false
+    runId.current++
+    setLeft([])
+    setRight([])
+    setPending({ left: false, right: false })
+    setProgress(null)
+    setSession(newSession || sid())
+    setBusy(false)
   }
 
-  function reset() {
-    runId.current++
-    setLeft([]); setRight([]); setSession(sid()); setBusy(false)
+  function onSelect(id) {
+    const a = attacks.find((x) => x.id === id)
+    if (!a) return
+    reset()
+    setSelected(id)
+    setMoment(a.moment || a.weakness)
+    setText(joinTurns(a.turns))
+    setDemo(a.simulate || '')
+    setPersona(a.persona || 'anonymous')
+  }
+
+  function onMoment(label) {
+    const g = groups.find((x) => x.label === label)
+    if (g) onSelect(g.attacks[0].id)
+  }
+
+  // open on the first demo moment so Send is ready
+  useEffect(() => {
+    if (groups.length && !selected) onSelect(groups[0].attacks[0].id)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [groups])
+
+  function changeMode(isLive) {
+    setLive(isLive)
+    reset()
   }
 
   const addLeft = (m) => setLeft((l) => [...l, m])
   const addRight = (m) => setRight((l) => [...l, m])
 
-  function leftFromGuardOnly({ ok, status, data }) {
-    if (!ok) return { role: 'bot', kind: 'error', text: `Guard error ${status}: ${data.error || ''} ${data.detail || ''}`.trim(), raw: null }
-    if (data.blocked) return { role: 'bot', kind: 'blocked', text: `Blocked by the Guard at the ${data.stage} check.`, raw: data }
-    return { role: 'bot', kind: 'ok', text: data.reply, raw: data }
-  }
-
-  function rightFromShielded({ ok, status, data }) {
-    if (!ok) return { role: 'bot', kind: 'error', text: `Error ${status}: ${data.error || ''} ${data.detail || ''}`.trim(), raw: null }
-    return { role: 'bot', kind: data.blocked ? 'blocked' : 'ok', text: data.reply, raw: data }
-  }
-
-  async function sendLive(messages) {
+  async function sendLive(messages, sess = session) {
     const my = ++runId.current
     setBusy(true)
     for (let i = 0; i < messages.length; i++) {
       if (runId.current !== my) return
+      setProgress(messages.length > 1 ? { i: i + 1, n: messages.length } : null)
       const m = messages[i]
-      addLeft({ role: 'user', text: m }); addRight({ role: 'user', text: m })
-      const body = { session_id: session, message: m, persona, ...(fault ? { simulate: fault } : {}) }
-      const [g, s] = await Promise.all([api('/chat/guard-only', body), api('/chat/shielded', body)])
-      if (runId.current !== my) return
-      addLeft(leftFromGuardOnly(g)); addRight(rightFromShielded(s))
-      if (i < messages.length - 1) await sleep(600)
+      addLeft({ role: 'user', text: m })
+      addRight({ role: 'user', text: m })
+      setPending({ left: true, right: true })
+      const body = { session_id: sess, message: m, persona, ...(demo ? { simulate: demo } : {}) }
+      const g = api('/chat/guard-only', body).then((r) => {
+        if (runId.current !== my) return
+        addLeft(fromGuardOnly(r))
+        setPending((p) => ({ ...p, left: false }))
+      })
+      const s = api('/chat/shielded', body).then((r) => {
+        if (runId.current !== my) return
+        addRight(fromShielded(r))
+        setPending((p) => ({ ...p, right: false }))
+      })
+      await Promise.all([g, s])
+      if (i < messages.length - 1) await sleep(500)
     }
-    setBusy(false)
-    pollUsage()
+    if (runId.current === my) {
+      setBusy(false)
+      setProgress(null)
+      pollUsage()
+    }
   }
 
   async function showReplay(attackId) {
     const c = replay?.cases?.find((x) => x.id === attackId)
-    if (!c) { addRight({ role: 'bot', kind: 'error', text: 'No recorded run for this attack.' }); return }
+    if (!c) {
+      addRight({ role: 'bot', kind: 'error', text: 'There is no recorded run for this attack.' })
+      return
+    }
     const my = ++runId.current
     setBusy(true)
-    for (const t of c.turns) {
+    for (let i = 0; i < c.turns.length; i++) {
       if (runId.current !== my) return
-      addLeft({ role: 'user', text: t.message }); addRight({ role: 'user', text: t.message })
-      await sleep(400)
-      addLeft(leftFromGuardOnly({ ok: !t.guard_only.error, status: t.guard_only.error, data: t.guard_only }))
-      addRight(rightFromShielded({ ok: !t.shielded.error, status: t.shielded.error, data: t.shielded }))
-      await sleep(400)
+      const t = c.turns[i]
+      const last = i === c.turns.length - 1
+      setProgress(c.turns.length > 1 ? { i: i + 1, n: c.turns.length } : null)
+      addLeft({ role: 'user', text: t.message })
+      addRight({ role: 'user', text: t.message })
+      setPending({ left: true, right: true })
+      await sleep(450)
+      if (runId.current !== my) return
+      addLeft(fromGuardOnly({ ok: !t.guard_only.error, status: t.guard_only.error, data: t.guard_only }, last && !!c.guard_only?.leaked))
+      addRight(fromShielded({ ok: !t.shielded.error, status: t.shielded.error, data: t.shielded }))
+      setPending({ left: false, right: false })
+      await sleep(350)
     }
-    setBusy(false)
+    if (runId.current === my) {
+      setBusy(false)
+      setProgress(null)
+    }
   }
 
   function send() {
     if (busy) return
     const trimmed = text.trim()
-    if (!trimmed && !current) return
-    const isLibrary = current && text === (current.turns.length === 1 ? current.turns[0] : current.turns.join('\n---\n'))
-    const messages = isLibrary ? current.turns : [trimmed]
-    if (useReplay) {
+    if (!trimmed) return
+    if (!live) {
       if (isLibrary) showReplay(current.id)
-      else addRight({ role: 'bot', kind: 'error', text: 'Replay mode only plays recorded attacks from the library.' })
+      else addRight({ role: 'bot', kind: 'error', text: 'Replay only plays the recorded attacks. Switch to Live to send your own message.' })
       return
     }
-    sendLive(messages)
+    // typing your own message after a library attack starts a new conversation, so old harm is not carried over
+    let sess = session
+    if (!isLibrary && ranLibrary.current) {
+      sess = sid()
+      reset(sess)
+    }
+    ranLibrary.current = !!isLibrary
+    sendLive(isLibrary ? current.turns : [trimmed], sess)
   }
 
-  const lastRight = [...right].reverse().find((m) => m.role === 'bot' && m.raw)
-  const lastLeft = [...left].reverse().find((m) => m.role === 'bot' && m.raw)
+  // Only say something when it helps: multi-turn attacks, or text that replay cannot play.
+  const hint = isLibrary && current.turns.length > 1
+    ? `This attack plays ${current.turns.length} messages in order.`
+    : !isLibrary && !live
+      ? 'Replay only plays the recorded attacks. Switch to Live to send your own message.'
+      : ''
+
+  const expected = isLibrary ? current.expected : undefined
+  const rawLeft = lastRaw(left)
+  const rawRight = lastRaw(right)
 
   return (
     <div className="app">
-      <header>
-        <div>
-          <h1>Aim Shield <span>Attack Lab</span></h1>
-          <p className="sub">Same message, two defences: the Guard alone vs Guard + Aim Shield.</p>
-        </div>
-        <div className="head-right">
-          <nav>
-            <button className={tab === 'lab' ? 'on' : ''} onClick={() => setTab('lab')}>Lab</button>
-            <button className={tab === 'score' ? 'on' : ''} onClick={() => setTab('score')}>Scoreboard</button>
-          </nav>
-          <label className="toggle">
-            <input type="checkbox" checked={useReplay} onChange={(e) => { setUseReplay(e.target.checked); reset() }} />
-            Replay recorded run
-          </label>
-          <span className="quota" title="Guard quota (GET /v1/usage)">{useReplay ? 'offline replay' : usageText(usage)}</span>
-        </div>
-      </header>
+      <a className="skip" href="#stage">Skip to results</a>
+      <TopBar
+        tab={tab}
+        setTab={setTab}
+        live={live}
+        setLive={changeMode}
+        usage={usage}
+        theme={theme}
+        onTheme={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+        present={present}
+        onPresent={() => setPresent(!present)}
+      />
 
-      {tab === 'score' ? <Scoreboard replay={replay} /> : (
+      {!live && (
+        <p className="replay-note" role="note">
+          <span className="wrap">Replay: showing recorded results. Nothing is sent to the Guard or the model.</span>
+        </p>
+      )}
+
+      {tab === 'score' ? (
+        <Scoreboard replay={replay} />
+      ) : (
         <>
-          <section className="controls">
-            <select value={selected} onChange={(e) => onSelect(e.target.value)} aria-label="Attack library">
-              <option value="">Attack library…</option>
-              {Object.entries(grouped).map(([w, list]) => (
-                <optgroup key={w} label={w}>
-                  {list.map((a) => <option key={a.id} value={a.id}>{a.title}</option>)}
-                </optgroup>
-              ))}
-            </select>
-            <textarea
-              value={text}
-              onChange={(e) => { setText(e.target.value); setSelected(selected && attacks.find((a) => a.id === selected) ? selected : '') }}
-              placeholder="Type your own attack (or a normal question) and press Send"
-              rows={3}
-              onKeyDown={(e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) send() }}
+          <div className="setup">
+            <ScenarioRail groups={groups} active={moment} onMoment={onMoment} selectedId={selected} onSelect={onSelect} />
+            <Composer
+              text={text}
+              setText={setText}
+              onSend={send}
+              busy={busy}
+              progress={progress}
+              hint={hint}
+              persona={persona}
+              setPersona={(p) => { setPersona(p); reset() }}
+              demo={demo}
+              setDemo={setDemo}
+              onNew={reset}
             />
-            <div className="btns">
-              <select value={persona} onChange={(e) => { setPersona(e.target.value); reset() }} aria-label="Customer session"
-                      title="Who is using the support chat: sets the session's trust level">
-                <option value="anonymous">Customer: anonymous (level 0)</option>
-                <option value="ama">Customer: logged in as Ama (level 1)</option>
-                <option value="ama_verified">Customer: Ama, verified (level 2)</option>
-              </select>
-              <select value={fault} onChange={(e) => setFault(e.target.value)} aria-label="Guard fault"
-                      title="Demo only: make the Guard fail, to show what each side does (no quota used)">
-                <option value="">Guard: working</option>
-                <option value="outage">Guard: outage (502)</option>
-                <option value="partial">Guard: partial result</option>
-              </select>
-              <button className="primary" onClick={send} disabled={busy || (!text.trim())}>{busy ? 'Running…' : 'Send'}</button>
-              <button onClick={reset}>New session</button>
-            </div>
-          </section>
+          </div>
 
-          <main className="panes">
-            <Pane title="Guard only" subtitle="What the app does today" messages={left} side="left"
-                  tools={left.flatMap((m) => m.raw?.tool_log || [])} trust={lastLeft?.raw?.trust_level}>
-              {lastLeft && <GuardRaw data={lastLeft.raw} />}
+          <main className="wrap stage" id="stage">
+            <Pane
+              side="left"
+              title="Guard only"
+              subtitle="What a typical app does today"
+              botName="KwikPay Assist"
+              blockedName="SecureAI Guard"
+              messages={left}
+              pending={pending.left}
+              outcome={guardOutcome(left, { expected, replayHarm: lastBot(left)?.replayHarm })}
+              tools={left.flatMap((m) => m.raw?.tool_log || [])}
+              trust={rawLeft?.raw?.trust_level}
+            >
+              <GuardSummary data={rawLeft?.raw} />
             </Pane>
-            <Pane title="Guard + Aim Shield" subtitle="Our layers beside the Guard" messages={right} side="right"
-                  tools={right.flatMap((m) => m.raw?.tool_log || [])} trust={lastRight?.raw?.trust_level}>
-              {lastRight && <ShieldTrace data={lastRight.raw} />}
+            <Pane
+              side="right"
+              title="Guard + Aim Shield"
+              subtitle="Our layers beside the Guard"
+              botName="KwikPay Assist"
+              blockedName="Aim Shield"
+              messages={right}
+              pending={pending.right}
+              outcome={aimOutcome(right, { expected })}
+              tools={right.flatMap((m) => m.raw?.tool_log || [])}
+              trust={rawRight?.raw?.trust_level}
+            >
+              <Pipeline key={right.length} data={rawRight?.raw} />
             </Pane>
           </main>
+
         </>
       )}
     </div>
-  )
-}
-
-const LEVELS = ['anonymous', 'logged in as Ama', 'verified']
-
-function ToolLog({ events }) {
-  return (
-    <div className="tools">
-      <h3>Tool log <small>(mock KwikPay)</small></h3>
-      {events.length === 0 && <p className="empty">No tool was called.</p>}
-      {events.map((e, i) => {
-        const bad = e.status === 'executed' && !e.authorised
-        const cls = e.status === 'denied' ? 'amber' : bad ? 'red' : 'green'
-        return (
-          <div className="row" key={i}>
-            <span className={`dot ${cls}`} />
-            <b>{e.tool}</b>
-            <code>{Object.values(e.args || {}).join(', ')}</code>
-            <span className={`pill ${cls}`}>{e.status === 'denied' ? 'DENIED' : bad ? 'EXECUTED, NOT AUTHORISED' : 'executed'}</span>
-            <span className="why">{e.detail}</span>
-          </div>
-        )
-      })}
-    </div>
-  )
-}
-
-function Pane({ title, subtitle, messages, side, children, tools = [], trust }) {
-  const end = useRef(null)
-  useEffect(() => { end.current?.scrollIntoView({ block: 'nearest' }) }, [messages])
-  return (
-    <section className={`pane ${side}`}>
-      <h2>{title} <small>{subtitle}</small>{trust !== undefined && <span className="trust">trust {trust}: {LEVELS[trust]}</span>}</h2>
-      <div className="chat">
-        {messages.length === 0 && <p className="empty">Pick an attack or type a message.</p>}
-        {messages.map((m, i) => (
-          <div key={i} className={`bubble ${m.role} ${m.kind || ''}`}>
-            {m.role === 'bot' && m.kind && m.kind !== 'ok' && <b className="tag">{m.kind === 'blocked' ? 'BLOCKED' : 'ERROR'}</b>}
-            <span>{m.text && m.text.length > 700 ? m.text.slice(0, 700) + '…' : m.text}</span>
-          </div>
-        ))}
-        <div ref={end} />
-      </div>
-      <ToolLog events={tools} />
-      {children}
-    </section>
-  )
-}
-
-function GuardRaw({ data }) {
-  const rows = [['prompt', data.guard_prompt], ['response', data.guard_response]].filter(([, r]) => r)
-  return (
-    <div className="strip">
-      <h3>Raw Guard results</h3>
-      {rows.map(([name, r]) => (
-        <div className="row" key={name}>
-          <span className={`dot ${r.allowed ? 'green' : 'red'}`} />
-          <b>{name}</b>
-          <span>allowed: {String(r.allowed)}</span>
-          <span>flags: {r.flags?.length ? r.flags.join(', ') : 'none'}</span>
-          <span>status: {r.status}</span>
-          <code>{r.request_id}</code>
-        </div>
-      ))}
-    </div>
-  )
-}
-
-function ShieldTrace({ data }) {
-  const iv = data.input_verdict, ov = data.output_verdict
-  const steps = [...(iv?.trace || []).map((t) => ({ ...t, side: 'in' })), ...(ov?.trace || []).map((t) => ({ ...t, side: 'out' }))]
-  const headline = (ov && ov.decision !== 'ALLOW') ? ov : iv
-  const calls = (iv?.guard_calls || 0) + (ov?.guard_calls || 0)
-  return (
-    <div className="strip">
-      {headline && (
-        <div className={`banner ${tone(headline.decision)}`}>
-          <b>{headline.decision}</b>
-          {headline.fired_layer && <span> · {headline.fired_layer}</span>}
-          <p>{headline.reason}</p>
-          {headline.next_step && <p className="next">Next step: {headline.next_step}</p>}
-        </div>
-      )}
-      {iv?.sanitized_text && (
-        <p className="saw"><b>What the model actually saw:</b> {iv.sanitized_text}</p>
-      )}
-      <h3>Layer trace <small>{calls} Guard call(s) · {data.total_latency_ms} ms</small></h3>
-      {steps.map((t, i) => (
-        <div className="row" key={i}>
-          <span className={`dot ${tone(t.decision)}`} />
-          <b>{t.side === 'out' ? 'out · ' : ''}{t.layer}</b>
-          <span className="lat">{t.latency_ms} ms</span>
-          {t.reason && <span className="why">{t.reason}</span>}
-        </div>
-      ))}
-    </div>
-  )
-}
-
-function Scoreboard({ replay }) {
-  if (!replay) return <p className="empty big">No recorded results yet. Run <code>python eval/run_suite.py</code>.</p>
-  const s = replay.summary || {}
-  const per = s.per_weakness || {}
-  return (
-    <main className="score">
-      {replay.synthetic && <div className="banner amber"><b>PLACEHOLDER DATA</b><p>These numbers are synthetic, not measurements. Run eval/run_suite.py to replace them.</p></div>}
-      <table>
-        <thead><tr><th>Weakness</th><th>Attacks</th><th>Guard alone caught</th><th>Guard + Aim caught</th></tr></thead>
-        <tbody>
-          {Object.entries(per).map(([w, v]) => (
-            <tr key={w}><td>{w}</td><td>{v.n}</td><td>{v.guard_only_caught}/{v.n}</td><td className="good">{v.shielded_caught}/{v.n}</td></tr>
-          ))}
-        </tbody>
-      </table>
-      <div className="facts">
-        <div><b>{s.benign?.guard_only_wrongly_blocked ?? '–'} vs {s.benign?.shielded_wrongly_blocked ?? '–'}</b><span>harmless messages wrongly blocked (Guard / Aim), of {s.benign?.n ?? '–'}</span></div>
-        <div><b>{s.added_screening_ms?.median ?? '–'} ms</b><span>median added screening time on messages that pass (p95 {s.added_screening_ms?.p95 ?? '–'} ms), excluding the LLM</span></div>
-        <div><b>{s.harmful_replies?.guard_only ?? '–'} vs {s.harmful_replies?.shielded ?? '–'}</b><span>harmful replies shown to the user (Guard only / Aim): leaked the canary or asked for a PIN</span></div>
-        <div><b>{s.guard_calls_per_case?.guard_only ?? '–'} → {s.guard_calls_per_case?.shielded ?? '–'}</b><span>Guard calls per case (Guard / Aim)</span></div>
-      </div>
-      <h3>Still missed by Aim</h3>
-      <p>{s.known_misses?.length ? s.known_misses.join(', ') : 'none in this run'}</p>
-      <p className="muted">Recorded {replay.generated_at}</p>
-    </main>
   )
 }

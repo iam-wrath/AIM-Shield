@@ -46,9 +46,11 @@ class SessionStore:
         self._data: dict[tuple[str, str], list[ChatMessage]] = defaultdict(list)
 
     def history(self, mode: str, session_id: str) -> list[ChatMessage]:
-        return list(self._data[(mode, session_id)])
+        return list(self._data.get((mode, session_id), []))  # .get: reading must not create a session
 
     def append_turn(self, mode: str, session_id: str, user: str, assistant: str) -> None:
+        if (mode, session_id) not in self._data and len(self._data) >= 2000:
+            self._data.pop(next(iter(self._data)))  # bounded memory: evict the oldest session
         h = self._data[(mode, session_id)]
         h += [ChatMessage(role="user", content=user), ChatMessage(role="assistant", content=assistant)]
         del h[: max(0, len(h) - self._limit)]

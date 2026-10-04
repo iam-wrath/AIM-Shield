@@ -66,6 +66,14 @@ class ToolEvent(BaseModel):
     authorised: bool = True  # ground truth from the mock world, recorded on both sides
 
 
+class Outcome(BaseModel):
+    """What the customer was exposed to: harm is true if a reply leaked the code, asked for a PIN or
+    password, or a tool ran that the mock world says was not authorised."""
+    harm: bool = False
+    kinds: list[str] = Field(default_factory=list)  # unauthorised_tool | asked_for_secret | leaked_code
+    unauthorised_calls: int = 0
+
+
 class TraceStep(BaseModel):
     layer: str
     decision: Decision  # ALLOW=green, WARN/REDACT=amber, BLOCK=red in the UI
@@ -91,8 +99,8 @@ class Verdict(BaseModel):
 
 class ChatRequest(BaseModel):
     session_id: str = Field(min_length=1, max_length=128)
-    message: str = Field(min_length=1)
-    simulate: Literal["outage", "partial"] | None = None  # demo: pretend the Guard fails (W4)
+    message: str = Field(min_length=1, max_length=20000)  # bigger bodies are refused before any work is done
+    simulate: Literal["outage", "partial", "rag_off"] | None = None  # demo: Guard fails (W4), or retrieved-document screen off
     persona: Literal["anonymous", "ama", "ama_verified"] = "anonymous"  # trust level the session starts at
 
 
@@ -104,6 +112,7 @@ class GuardOnlyResponse(BaseModel):
     guard_response: GuardResult | None = None
     tool_log: list[ToolEvent] = Field(default_factory=list)
     trust_level: int = 0
+    outcome: Outcome = Field(default_factory=Outcome)
     total_latency_ms: float
 
 
@@ -114,4 +123,5 @@ class ShieldedResponse(BaseModel):
     output_verdict: Verdict | None = None
     tool_log: list[ToolEvent] = Field(default_factory=list)
     trust_level: int = 0
+    outcome: Outcome = Field(default_factory=Outcome)
     total_latency_ms: float

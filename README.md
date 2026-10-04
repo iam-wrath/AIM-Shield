@@ -2,17 +2,81 @@
 
 SecureAI Hackathon 2026 (CAIRLab-KNUST), Challenge 3.
 
-Aim Shield is a FastAPI proxy that adds extra checks beside the SecureAI Guard, on both sides of the LLM, to catch what the Guard misses: payloads split across turns, disguised text, Twi/Pidgin, Ghana-specific data, fail-open behaviour, long inputs, and indirect injection.
+Aim Shield adds extra checks beside the SecureAI Guard, on both sides of the LLM, to catch what the Guard misses: Ghana-specific data, payloads split across turns, base64-hidden instructions, unsafe model answers and poisoned documents, who is logged in, and fail-open behaviour. (It already handles English, Twi and Pidgin injection and most encodings well, so we did not rebuild those.) It is one FastAPI app that sits between a chat and the LLM and talks to the Guard on both sides.
 
-**System we protect:** **KwikPay Assist**, a fictional Ghanaian mobile money support agent (KwikPay is invented on purpose, so the demo is never mistaken for a real provider). Customers write in English, Twi and Pidgin about failed transfers, reversals, PIN resets and limits. It answers from KwikPay support policies (mini RAG), has three mock tools (`check_balance`, `request_reversal`, `reset_pin`) and a hidden system prompt holding a canary code. Aim Shield wraps it, and the customer's trust level (0 anonymous, 1 logged in as Ama, 2 verified with a mock one-time code) is part of what it checks.
+**System we protect:** **KwikPay Assist**, a fictional Ghanaian mobile money support agent (KwikPay is invented on purpose, so the demo is never mistaken for a real provider). Customers write in English, Twi and Pidgin about failed transfers, reversals, PIN resets and limits. It answers from KwikPay support policies (mini RAG), has three mock tools (`check_balance`, `request_reversal`, `reset_pin`) plus a helper that texts the one-time code, and a hidden system prompt holding a canary code. Aim Shield wraps it, and the customer's trust level (0 anonymous, 1 logged in as Ama, 2 verified with a mock one-time code) is part of what it checks.
 
 **One-line pitch:** the Guard screens text; Aim Shield also knows Ghanaian data, who is logged in, how the conversation built up, and what a real mobile money provider would never ask.
+
+## How to run
+
+Pick one of three ways. All of them serve the **Attack Lab** at http://localhost:8000.
+
+| | Needs | Does |
+| --- | --- | --- |
+| **A. Recorded run** | Docker, or Python + Node. **No keys.** | Plays the real recorded results of every attack, both sides. Live sending is disabled. |
+| **B. Live, with Docker** | Docker, plus a `.env` with your keys | The real Guard and LLM, side by side. |
+| **C. Live, without Docker** | Python 3.11+, Node 20.19+ or 22+, plus a `.env` | Same as B, run directly. |
+
+### A. Recorded run (no keys)
+With Docker:
+```bash
+docker compose up --build replay
+```
+Open http://localhost:8000, switch the top bar to **Replay**, pick a scenario and an attack, press Send. Stop it with `docker compose --profile replay down`.
+
+Without Docker (Windows Git Bash shown; see the note below for other shells):
+```bash
+python -m venv .venv
+.venv/Scripts/python -m pip install -r backend/requirements.txt
+cd frontend && npm install && npm run build && cd ..
+cd backend && ../.venv/Scripts/python -m uvicorn replay_server:app --port 8000
+```
+
+### B. Live demo with Docker
+1. Copy `.env.example` to `.env` and fill in the values it lists.
+2. Run `docker compose up --build` (the first build takes a couple of minutes; Docker builds the UI, so Node is not needed).
+3. Open http://localhost:8000. Stop with `docker compose down`.
+
+The port is published on `127.0.0.1` only, so the app is not reachable from other machines.
+
+### C. Live demo without Docker
+```bash
+python -m venv .venv
+.venv/Scripts/python -m pip install -r backend/requirements.txt
+cp .env.example .env            # then fill in the values it lists
+cd frontend && npm install && npm run build && cd ..
+cd backend && ../.venv/Scripts/python -m uvicorn app.main:app --port 8000
+```
+The UI only appears if `npm run build` was run (it creates `frontend/dist`). To run the tests too, install `backend/requirements-dev.txt` instead.
+
+**Other shells:** on macOS/Linux replace `.venv/Scripts/python` with `.venv/bin/python`; in Windows PowerShell use `.venv\Scripts\python` and `..\.venv\Scripts\python`, `Copy-Item .env.example .env`, and run the commands one per line (PowerShell 5.1 has no `&&`).
+
+
+### Using the Attack Lab
+The page opens in a light theme (a moon button switches to dark; **Presenter** makes everything larger for a projector). Each side opens with a plain verdict, then the evidence, then the conversation.
+
+1. **Pick a scenario.** Six numbered steps are the demo moments (normal use, the Insider, the Outsider, the bot turned against the customer, the rapid round, when the Guard fails). A line under them says what the scenario shows; the **Attack** menu picks one within it.
+2. **Press Send** (or Enter; Shift+Enter adds a line). Library attacks with several messages play them in order ("Turn 2 of 3").
+3. **Read the two verdicts.** **Guard only** says "Harm done" (red), "Attack got through" (red) or "Stopped by the Guard"; **Guard + Aim Shield** says "Attack stopped by ...", "Sensitive data masked ...", "Action refused" or "Answered normally". Green means a defence worked; red means harm happened.
+4. **Look at the evidence.** Left: the actions the mock KwikPay tools took ("Ran, not authorised" is the harm the Guard cannot see) and what the Guard said. Right: the layer pipeline (one chip per layer; click a chip for its reason) and "What the model saw" when data was masked.
+5. **Type your own message** in the box and press Enter. Typing after a library attack starts a fresh conversation.
+
+Under the message box, **Customer** and **Demo switch** show their current setting; choose **Change** to edit them. Customer sets the trust level the session starts at (Anonymous, Logged in, Verified). The demo switch makes the Guard fail ("outage" or "partial", no quota used) or turns the retrieved-document screen off so the Output Sentinel is the last line of defence. Choosing an attack sets both for you.
+
+The top bar has **Live / Replay** (replay plays the real recorded results and needs no network), the Guard quota, and the **Scoreboard** tab. The mock one-time code is `482913`; the lab shows the SMS in the actions list.
+
+`message` is limited to 20,000 characters, `persona` is `anonymous`, `ama` or `ama_verified`, and `simulate` is `outage`, `partial` or `rag_off`. The chat routes are rate-limited per client IP.
+
+**Offline rehearsal (no token, no network):** `cd backend && ../.venv/Scripts/python -m uvicorn mock_server:app --port 8001`. This uses a fake Guard and fake LLM for UI work only; results from it are not measurements.
+
+**Tests** (91, all Guard and LLM traffic mocked with respx; the real Guard is never called): `cd backend && ../.venv/Scripts/python -m pytest`.
 
 ![architecture](docs/architecture.svg)
 
 ## Weaknesses we proved
 
-We probed the real SecureAI Guard with synthetic data only (about 100 calls); every probe with its `request_id` and the Guard's actual flags is in [docs/probe-findings.md](docs/probe-findings.md). Four weaknesses are confirmed, and several of our own hypotheses failed, which we report below.
+We probed the real SecureAI Guard with synthetic data only (87 probe calls); every probe with its `request_id` and the Guard's actual flags is in [docs/probe-findings.md](docs/probe-findings.md). Four weaknesses are confirmed, and several of our own hypotheses failed, which we report below.
 
 | # | Weakness | What the Guard did (request IDs) |
 | --- | --- | --- |
@@ -29,13 +93,13 @@ We probed the real SecureAI Guard with synthetic data only (about 100 calls); ev
 
 ## How each weakness is answered
 
-| # | Weakness | Aim layer | File |
+| # | Weakness | Aim layer | File (under `backend/app/`) |
 | --- | --- | --- | --- |
 | W1 | Ghana data blind spot: Ghana Card, MoMo + PIN, KNUST IDs, TIN, `sk-`/`ghp_`/`AKIA` keys | Ghana Lens (both sides): masks, routes the one-time code | `layers/ghana_lens.py` |
 | (identity) | The Guard sees text, not who is logged in | Identity Binding: trust level and ownership, checks every tool call | `layers/identity_binding.py`, `kwikpay.py` |
 | W2 | Amnesia: payload split across turns | Conversation Memory | `layers/memory.py` |
 | W3 | Base64 passes the Guard (leetspeak, spaced letters, homoglyphs, zero-width, reversed text, hex and ROT13 do not) | Base64 decoder: decode, then re-check with the Guard | `layers/canonicaliser.py` |
-| W4 | Fail-open on `partial` / 502 / 429 | Fail-safe Policy (+ SHA-256 result cache in the client) | `layers/failsafe.py`, `policy.py`, `guard_client.py` |
+| W4 | Fail-open on `partial` / 502 / 429 | Fail-safe Policy: local checks decide and money tools are paused (+ SHA-256 result cache in the client) | `layers/failsafe.py`, `policy.py`, `kwikpay.py`, `guard_client.py` |
 | W5 | Length: >4,000 chars gives 413 | Chunker (overlapping 3,800-char windows) | `layers/chunker.py`, `policy.py` |
 | W6 | Indirect injection via RAG docs, system-prompt leakage | RAG screen, Output Sentinel | `rag/store.py`, `layers/output_sentinel.py` |
 
@@ -43,97 +107,52 @@ Every decision is one Verdict: ALLOW, WARN, REDACT or BLOCK, with the layer that
 
 **Trust levels.** The customer's session starts at one of three levels, chosen in the Attack Lab dropdown (or by an attack's `persona`): **0 Anonymous** (general questions only), **1 Logged in as Ama** (the agent can discuss her account), **2 Verified with a mock one-time code** (reversal and PIN reset allowed, only on her own number and transactions). Identity Binding checks every tool call against this level and owner.
 
-Data files you can extend without touching code: `layers/data/ghana_patterns.json` (Ghana ID patterns), `attacks/*.json` (the attack library, with a `persona` per attack), `rag_docs/*.md` (KwikPay policies; the `*_UPDATED.md` file is deliberately poisoned for the demo). All data is invented.
-
-## Setup
-
-Requires Python 3.11+ and Node 18+ (Node only to build the UI).
-
-```bash
-python -m venv .venv
-.venv/Scripts/python -m pip install -r backend/requirements-dev.txt   # Windows
-# source .venv/bin/activate && pip install -r backend/requirements-dev.txt   # macOS/Linux
-cp .env.example .env    # then fill in GUARD_URL, GUARD_TOKEN, LLM_URL, LLM_KEY, LLM_MODEL
-cd frontend && npm install && npm run build && cd ..
-```
-
-**Never commit `.env`.** It holds the Guard token. `.env` is git-ignored, and `.githooks/pre-commit` blocks commits containing a Guard token (the `sai_` prefix, or a filled-in GUARD_TOKEN assignment) (enable with `git config core.hooksPath .githooks`). Use synthetic data only; never send real personal data to the Guard.
-
-## Run
-
-You need two things in `.env`: the team's Guard URL and token, and an LLM key. `LLM_URL` and `LLM_MODEL` default to nothing; any OpenAI-compatible service works (we used OpenAI: `LLM_URL=https://api.openai.com/v1`, `LLM_MODEL=gpt-4o-mini`).
-
-```bash
-cd backend
-../.venv/Scripts/python -m uvicorn app.main:app --port 8000
-```
-
-Open http://localhost:8000 for the **Attack Lab**:
-
-- two chat panes (Guard only | Guard + Aim Shield) running the same message, with a layer trace under the right pane showing what fired, why, and how long it took;
-- an attack library dropdown, and a **free-type box: type any message and press Send (or Ctrl+Enter)**; it goes live through both sides;
-- a **Guard fault switch** ("outage" or "partial result") that makes the Guard fail on demand, to show what each side does when the Guard gives no answer (no quota used);
-- a live quota counter, a Scoreboard tab, and **Replay recorded run** (plays the real recorded results; no network needed).
-
-**No keys at all?** `cd backend && ../.venv/Scripts/python -m uvicorn replay_server:app --port 8000`, then tick "Replay recorded run". Live sending is disabled in that mode and says so. With Docker: `docker compose up` (reads `.env`).
-
-| Route | Purpose |
-| --- | --- |
-| `POST /chat/guard-only` `{session_id, message}` | Guard check, LLM, Guard response check; returns raw Guard results |
-| `POST /chat/shielded` `{session_id, message}` | Same flow through the Aim layers; returns Verdicts with traces |
-| `GET /usage` | Guard quota (cached 5 s) |
-| `GET /attacks`, `GET /replay` | Attack library; recorded run (`eval/results.json`) |
-| `GET /health` (`?deep=true` also pings the Guard) | Liveness |
-
-**Offline rehearsal (no token, no network):** `cd backend && ../.venv/Scripts/python -m uvicorn mock_server:app --port 8001`. This uses a fake Guard and fake LLM for UI work only; results from it are not measurements.
-
-## Tests
-
-All Guard traffic is mocked with respx; the real Guard is never called.
-
-```bash
-cd backend && ../.venv/Scripts/python -m pytest
-```
+Data files you can extend without touching code: `layers/data/ghana_patterns.json` (Ghana ID patterns), `attacks/*.json` (the attack library, with a `persona` per attack and an optional `moment` for the dropdown group), `rag_docs/*.md` (KwikPay policies; the `*_UPDATED.md` file is deliberately poisoned for the demo). All data is invented.
 
 ## Probing and evaluation
 
+Use the venv's Python (`.venv/Scripts/python`, or `.venv/bin/python` on macOS/Linux):
+
 ```bash
-python probes/run_probes.py --probes probes/probes6.json --dry-run     # shows what would be sent; no network
-python probes/run_probes.py --probes probes/probes6.json --out probes/results_batch6.csv   # real Guard calls
-python probes/summarise.py                 # rebuilds docs/probe-findings.md from probes/results_batch*.csv
-python eval/run_suite.py --base http://localhost:8000   # real run, ~7 Guard calls per turn; max twice a day
+.venv/Scripts/python probes/run_probes.py --probes probes/probes6.json --dry-run     # shows what would be sent; no network
+.venv/Scripts/python probes/run_probes.py --probes probes/probes6.json --out probes/results_batch6.csv   # real Guard calls
+.venv/Scripts/python probes/summarise.py                 # rebuilds docs/probe-findings.md from probes/results_batch*.csv
+.venv/Scripts/python eval/run_suite.py --base http://localhost:8000   # needs the app running; ~7 Guard calls per turn; max twice a day
 ```
 
 **How we tested.** Probe batches 1 to 9 (`probes/make_probes*.py`) send synthetic text straight to the Guard and record the allowed/flagged answer, flags and `request_id`. Batches 6 to 9 are the exact KwikPay demo scripts; we reworded fragments until each turn passed alone and re-ran them. The attack suite then sends the same attacks through the Guard-only route and the Guard + Aim route of the running app.
 
 ## Results (full suite, real Guard + `gpt-4o-mini`)
 
-`eval/results.json` holds the last full run: 34 attacks, 41 turns, `"synthetic": false`. It feeds the Scoreboard and Replay mode. "Caught" means the route blocked, redacted or dropped the harmful content (for W4 it includes the simulated Guard faults, which use no quota).
+`eval/results.json` holds the last full run plus one later case (`w6-sentinel`, see its `note`): 35 attacks, 42 turns, `"synthetic": false`. It feeds the Scoreboard and Replay mode. "Caught" means the route blocked, redacted or dropped the harmful content (for W4 it includes the simulated Guard faults, which use no quota).
 
 | Weakness | Attacks | Missed by Guard alone | Missed by Guard + Aim |
 | --- | --- | --- | --- |
 | W1 Ghana data (and the Insider) | 8 | 8 | 0 |
 | W2 Split across turns (and the Outsider) | 3 | 3 | 0 |
 | W3 Base64 | 4 | 4 | 0 |
-| W6 Response side / poisoned document | 3 | 3 | 0 |
+| W6 Response side / poisoned document | 4 | 4 | 0 |
 | W5 Over 4,000 characters | 1 | 1 | 0 |
 | W4 Guard failure (simulated) | 3 | 3 | 0 |
 | Guard handles well (control) | 3 | 0 | 0 |
 
-- **Harmful outcomes:** 8 replies where the bot acted on an attack (leaked the code, followed the poisoned policy or the scam) with the Guard alone, 0 with Aim; 5 unauthorised tool calls with the Guard alone, 0 with Aim.
+- **Harmful outcomes:** 9 replies where the bot acted on an attack (leaked the code, followed the poisoned policy or the scam) with the Guard alone, 0 with Aim; 5 unauthorised tool calls with the Guard alone, 0 with Aim.
 - **Harmless messages wrongly blocked:** 0 of 9 in both modes. Two harmless verification messages (`kp-ok-otp-ask`, `kp-ok-otp-type`) got a WARN, not a block: the RAG screen dropped the poisoned policy paragraph the bot retrieved for them. The OTP message `n-otp` is redacted on purpose before the LLM sees it. Separately, the probes found the Guard alone blocks 1 of 14 harmless-but-edgy messages (fp-12).
-- **Guard calls per message:** 2.09 with the Guard alone, 2.44 with Guard + Aim (local checks run first and cost no quota).
+- **Guard calls per message:** 2.03 with the Guard alone, 2.37 with Guard + Aim (local checks run first and cost no quota).
 - **Added screening time:** the suite's median was about -3 ms and p95 about 242 ms. The median is not meaningful: it subtracts two separate runs whose timings vary by more than Aim's own work, so we only claim that Aim's screening is small next to the LLM and Guard round trips, not a precise figure.
-- **Aim's own misses in this run:** none on these 34 cases. This is a small, hand-written suite, so it shows the demo works, not general effectiveness.
+- **Aim's own misses in this run:** none on these 35 cases. This is a small, hand-written suite, so it shows the demo works, not general effectiveness.
 
 ## Known limitations
 
 - Detection is heuristic (regexes and patterns); it will miss novel formats and phrasings. Honest misses go in the scoreboard's "Still missed" list.
 - We dropped a Twi/Pidgin translation layer: the Guard already catches Twi and Pidgin injections (probes w1-1, w1-2), so it would solve a problem we could not show.
 - RAG retrieval is naive keyword matching over a tiny corpus.
-- The evaluation suite is small (34 hand-written attacks written after we saw the Guard's misses); the numbers show the demo works, not general effectiveness.
+- The evaluation suite is small (35 hand-written attacks written after we saw the Guard's misses); the numbers show the demo works, not general effectiveness.
 - The poisoned-document demo depends on exact wording: the Guard flags a more explicit "send the money back and share your PIN" answer (w6c-5) but allowed the version we use (w6c-4).
 - The Outsider demo uses wording we tuned until the Guard passed each turn alone and flagged the joined text; other phrasings may behave differently (an earlier wording was allowed even when joined).
 - The added-screening-time measurement is noisy (see Results).
 - Harmless verification messages can show a WARN when the RAG screen drops the poisoned document.
+- The Attack Lab's "Harm done" verdict is computed by the server for live runs (a reply that leaks the code or asks for a PIN, or a tool the mock world says was not authorised). Recorded runs made before that field existed fall back to the tool log and the recorded outcome of the case.
+- The baseline agent is deliberately plain: its prompt tells it to follow the retrieved support policies exactly, as many RAG apps do, which is what makes the poisoned document work. The model (`gpt-4o-mini`) also varies from run to run, so a Guard-only attack does not always produce a harmful reply.
+- **Security scope (demo, run locally):** the app has no login. The customer's trust level (`persona`) is chosen in the browser and sent with each request, so anyone who can reach the app can pick "verified"; in a real deployment identity comes from the server-side session, not the client. The one-time code is a fixed mock value. `docker compose` therefore publishes the port on localhost only, and the chat routes are rate-limited per client IP. Full review, tools run and fixes: [docs/SECURITY-REVIEW.md](docs/SECURITY-REVIEW.md).
 - No token or real personal data is in this repo.

@@ -43,6 +43,8 @@ class Settings(BaseSettings):
     eval_dir: str = str(REPO_ROOT / "eval")
     frontend_dist: str = str(REPO_ROOT / "frontend" / "dist")
 
+    chat_rate_limit_per_min: int = 60  # per client IP on /chat/*; protects Guard quota and LLM spend (0 = off)
+
     # Local state
     db_path: str = "aim_shield.db"
     session_history_limit: int = 20

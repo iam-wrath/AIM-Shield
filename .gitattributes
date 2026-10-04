@@ -1,0 +1,7 @@
+# Keep line endings identical on every machine: the repo stores LF, so the shell hook and
+# Dockerfile work on Mac/Linux and diffs are not full of ^M noise.
+* text=auto eol=lf
+*.png binary
+*.ico binary
+*.woff2 binary
+.githooks/* text eol=lf

@@ -1,9 +1,18 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="light">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
     <title>Aim Shield Attack Lab</title>
+    <script>
+      // Apply the saved theme and presenter mode before first paint (light is the default for projectors).
+      try {
+        var d = document.documentElement
+        d.dataset.theme = localStorage.getItem('aim-theme') === 'dark' ? 'dark' : 'light'
+        if (localStorage.getItem('aim-present') === 'on') d.dataset.present = 'on'
+      } catch (e) {}
+    </script>
   </head>
   <body>
     <div id="root"></div>

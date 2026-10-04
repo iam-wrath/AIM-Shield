@@ -16,3 +16,4 @@ dist/
 # local data
 *.db
 *.db-journal
+*.log

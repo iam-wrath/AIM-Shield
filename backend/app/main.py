@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import time
+from collections import defaultdict, deque
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -28,7 +29,8 @@ from .guard_client import (
 from .layers import build_layers
 from .kwikpay import TOOLS, AuthStore, ToolRunner, maybe_send_otp, try_verify
 from .llm_client import ChatMessage, LLMClient, LLMError, build_llm_client
-from .models import ChatRequest, Decision, GuardOnlyResponse, ShieldedResponse
+from .outcome import compute_outcome
+from .models import ChatRequest, Decision, GuardOnlyResponse, ShieldedResponse, TraceStep
 from .policy import ShieldPipeline
 from .rag.store import RagStore, screen_chunks
 
@@ -72,7 +74,8 @@ def create_app(settings: Settings | None = None, llm: LLMClient | None = None,
         await app.state.llm.aclose()
         app.state.events.close()
 
-    app = FastAPI(title="Aim Shield", lifespan=lifespan)
+    # No public API docs: the routes are listed in the README.
+    app = FastAPI(title="Aim Shield", lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
 
     @app.exception_handler(GuardError)
     async def _guard_error(_: Request, exc: GuardError):
@@ -113,24 +116,44 @@ def create_app(settings: Settings | None = None, llm: LLMClient | None = None,
             return JSONResponse({"error": "no_replay", "detail": "eval/results.json not found"}, status_code=404)
         return json.loads(f.read_text(encoding="utf-8"))
 
+    hits: dict[str, deque] = defaultdict(deque)
+
+    def _rate_limit(request: Request) -> None:
+        """Sliding window per client IP on the chat routes: anyone who can reach the app can spend our quota."""
+        limit = app.state.settings.chat_rate_limit_per_min
+        if not limit:
+            return
+        now, ip = time.monotonic(), request.client.host if request.client else "?"
+        q = hits[ip]
+        while q and now - q[0] > 60:
+            q.popleft()
+        if len(q) >= limit:
+            raise HTTPException(429, "Too many requests. Please slow down.", headers={"Retry-After": "10"})
+        q.append(now)
+        if len(hits) > 5000:  # bounded memory
+            for k in [k for k, v in hits.items() if not v][:1000]:
+                hits.pop(k, None)
+
     def _live_only() -> None:
         if getattr(app.state, "replay_only", False):
             raise HTTPException(503, getattr(app.state, "replay_message", "replay-only mode"))
 
     @app.post("/chat/guard-only", response_model=GuardOnlyResponse)
-    async def chat_guard_only(req: ChatRequest):
+    async def chat_guard_only(req: ChatRequest, request: Request):
         """Baseline: trusts the Guard's `allowed` flag exactly as a naive app would."""
         _live_only()
+        _rate_limit(request)
         t0 = time.perf_counter()
         st = app.state
         ms = lambda: round((time.perf_counter() - t0) * 1000, 1)  # noqa: E731
 
         state = st.auth.ensure("guard-only", req.session_id, req.persona)
-        naive = FaultGuard(req.simulate) if req.simulate else st.guard_naive
+        fault = req.simulate if req.simulate in ("outage", "partial") else None  # rag_off only affects the Aim side
+        naive = FaultGuard(fault) if fault else st.guard_naive
         try:
             gp = await naive.check_prompt(req.message)
         except GuardError:
-            if not req.simulate:
+            if not fault:
                 raise
             gp = fail_open_result("/v1/check/prompt")  # a typical app treats "no answer" as "not flagged"
         if not gp.allowed:
@@ -156,7 +179,7 @@ def create_app(settings: Settings | None = None, llm: LLMClient | None = None,
         try:
             gr = await naive.check_response(reply) if reply.strip() else None
         except GuardError:
-            if not req.simulate:
+            if not fault:
                 raise
             gr = fail_open_result("/v1/check/response")
         if gr is not None and not gr.allowed:
@@ -171,19 +194,23 @@ def create_app(settings: Settings | None = None, llm: LLMClient | None = None,
         st.events.record(session_id=req.session_id, mode="guard-only", stage="ok",
                          decision="ALLOW", guard_request_id=gp.request_id, latency_ms=ms())
         return GuardOnlyResponse(reply=reply, blocked=False, stage="ok", guard_prompt=gp, guard_response=gr,
-                                 tool_log=runner.events, trust_level=state.level, total_latency_ms=ms())
+                                 tool_log=runner.events, trust_level=state.level,
+                                 outcome=compute_outcome(reply, runner.events, st.settings.canary_token),
+                                 total_latency_ms=ms())
 
     @app.post("/chat/shielded", response_model=ShieldedResponse)
-    async def chat_shielded(req: ChatRequest):
+    async def chat_shielded(req: ChatRequest, request: Request):
         _live_only()
+        _rate_limit(request)
         t0 = time.perf_counter()
         st = app.state
         ms = lambda: round((time.perf_counter() - t0) * 1000, 1)  # noqa: E731
 
         state = st.auth.ensure("shielded", req.session_id, req.persona)
         pipeline = st.pipeline
-        if req.simulate:  # same layers, but the Guard fails the way we are demonstrating
-            pipeline = ShieldPipeline(FaultGuard(req.simulate), st.llm,
+        fault = req.simulate if req.simulate in ("outage", "partial") else None
+        if fault:  # same layers, but the Guard fails the way we are demonstrating
+            pipeline = ShieldPipeline(FaultGuard(fault), st.llm,
                                       st.pipeline.input_layers, st.pipeline.output_layers)
         iv = await pipeline.screen_input(req.session_id, req.message)
         st.events.record(session_id=req.session_id, mode="shielded", stage="input",
@@ -195,7 +222,12 @@ def create_app(settings: Settings | None = None, llm: LLMClient | None = None,
                                     input_verdict=iv, trust_level=state.level, total_latency_ms=ms())
 
         message = iv.sanitized_text or req.message
-        safe_chunks, rag_step = await screen_chunks(pipeline.guard, st.rag.retrieve(message))
+        retrieved = st.rag.retrieve(message)
+        if req.simulate == "rag_off":  # demo: retrieved documents reach the model unscreened, so the Output Sentinel is the last line
+            safe_chunks = retrieved
+            rag_step = TraceStep(layer="rag_screen", decision=Decision.ALLOW, reason="screen switched off for this demo")
+        else:
+            safe_chunks, rag_step = await screen_chunks(pipeline.guard, retrieved)
         iv.trace.append(rag_step)
         iv.guard_calls += rag_step.guard_calls
         if rag_step.decision is Decision.WARN and iv.decision is Decision.ALLOW:
@@ -222,7 +254,9 @@ def create_app(settings: Settings | None = None, llm: LLMClient | None = None,
 
         st.sessions.append_turn("shielded", req.session_id, message, reply)
         return ShieldedResponse(reply=reply, blocked=False, input_verdict=iv, output_verdict=ov,
-                                tool_log=runner.events, trust_level=state.level, total_latency_ms=ms())
+                                tool_log=runner.events, trust_level=state.level,
+                                outcome=compute_outcome(reply, runner.events, st.settings.canary_token),
+                                total_latency_ms=ms())
 
     return app
 

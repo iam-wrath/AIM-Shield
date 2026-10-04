@@ -18,6 +18,7 @@ from typing import Awaitable, Callable
 from .models import ToolEvent
 
 MONEY_TOOLS = {"request_reversal", "reset_pin"}
+MAX_SESSIONS = 2000  # in-memory stores keep at most this many sessions
 OTP_CODE = "482913"  # the mock SMS code every session receives
 
 
@@ -80,6 +81,8 @@ class AuthStore:
     def ensure(self, mode: str, session_id: str, persona: str = "anonymous") -> AuthState:
         persona = persona if persona in PERSONAS else "anonymous"
         st = self._s.get((mode, session_id))
+        if st is None and len(self._s) >= MAX_SESSIONS:
+            self._s.pop(next(iter(self._s)))  # bounded memory: evict the oldest session
         if st is None or st.persona != persona:  # a new session or a new persona resets trust
             level, owner = PERSONAS[persona]
             st = self._s[(mode, session_id)] = AuthState(persona, level, owner)

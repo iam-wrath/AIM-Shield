@@ -18,7 +18,7 @@ from ..guard_client import MAX_TEXT_CHARS
 from ..models import Decision
 from .base import Layer, LayerContext, LayerResult, flag_reason
 
-ZERO_WIDTH = re.compile("[​-‏‪-‮⁠-⁤­﻿]")
+ZERO_WIDTH = re.compile("[\u200b-\u200f\u202a-\u202e\u2060-\u2064\u00ad\ufeff]")
 
 # Cyrillic / Greek look-alikes -> Latin
 HOMOGLYPHS = str.maketrans({

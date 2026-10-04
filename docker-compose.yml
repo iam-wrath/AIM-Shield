@@ -1,12 +1,26 @@
 services:
+  # Live demo: needs a .env with the Guard URL/token and an LLM key.
+  #   docker compose up --build
   aim-shield:
     build: .
-    env_file: .env
+    env_file:
+      - path: .env
+        required: false  # without it the app stops at startup with "GUARD_TOKEN must be set"
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"  # localhost only: anyone who could reach the app could spend our Guard quota and LLM key
     volumes:
       - aim-data:/data
     environment:
       DB_PATH: /data/aim_shield.db
+
+  # Recorded run only: needs no keys and no .env. Tick "Replay recorded run" in the page.
+  #   docker compose up --build replay
+  replay:
+    build: .
+    profiles: ["replay"]
+    command: ["uvicorn", "replay_server:app", "--host", "0.0.0.0", "--port", "8000"]
+    ports:
+      - "127.0.0.1:8000:8000"
+
 volumes:
   aim-data:

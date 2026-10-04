@@ -25,7 +25,8 @@ class _NoLLM(LLMClient):
         raise LLMError(MSG)
 
 
-_s = Settings(_env_file=None, guard_token="replay-only", guard_url="https://replay.invalid", db_path=":memory:")
+_s = Settings(_env_file=None, guard_token="replay-only",  # nosec B106 (placeholder, no network)
+              guard_url="https://replay.invalid", db_path=":memory:")
 app = create_app(_s, llm=_NoLLM(), guard=_NoGuard(_s))
 app.state.replay_only = True
 app.state.replay_message = MSG

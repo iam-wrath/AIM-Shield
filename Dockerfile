@@ -14,6 +14,9 @@ COPY attacks attacks
 COPY rag_docs rag_docs
 COPY eval eval
 COPY --from=ui /ui/dist frontend/dist
+# run as an unprivileged user; /data holds the event log (mounted as a volume by docker-compose.yml)
+RUN useradd --create-home --uid 10001 appuser && mkdir -p /data && chown appuser /data
+USER appuser
 WORKDIR /app/backend
 EXPOSE 8000
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
